@@ -1,0 +1,99 @@
+{
+  "entities": {
+    "CrawlJob": {
+      "title": "CrawlJob",
+      "description": "A job that searches for contacts based on a niche and location.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "niche": { "type": "string" },
+        "city": { "type": "string" },
+        "ddd": { "type": "string" },
+        "sources": { "type": "array", "items": { "type": "string" } },
+        "max_pages_per_source": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "running", "completed", "failed"] },
+        "contacts_found": { "type": "number" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "uid": { "type": "string", "description": "The user ID of the job owner." },
+        "schedule": { "type": "string", "enum": ["once", "daily", "weekly", "monthly"] },
+        "last_run_at": { "type": "string", "format": "date-time" },
+        "next_run_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "niche", "sources", "status", "created_at", "uid"]
+    },
+    "Contact": {
+      "title": "Contact",
+      "description": "A contact found during a crawl job.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "e164_number": { "type": "string" },
+        "raw_number": { "type": "string" },
+        "source_url": { "type": "string" },
+        "source_type": { "type": "string" },
+        "niche": { "type": "string" },
+        "address": { "type": "string" },
+        "city": { "type": "string" },
+        "job_id": { "type": "string" },
+        "found_at": { "type": "string", "format": "date-time" },
+        "uid": { "type": "string", "description": "The user ID of the contact owner." },
+        "status": { "type": "string", "enum": ["new", "contacted", "interested", "converted", "rejected"] },
+        "notes": { "type": "string" },
+        "email": { "type": "string" },
+        "description": { "type": "string" },
+        "account_type": { "type": "string", "enum": ["personal", "business", "unknown"] },
+        "lead_quality": { "type": "number" },
+        "enriched_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "e164_number", "raw_number", "job_id", "found_at", "uid"]
+    },
+    "ErrorLog": {
+      "title": "ErrorLog",
+      "description": "A log of an error that occurred during crawling.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "source": { "type": "string" },
+        "message": { "type": "string" },
+        "stack": { "type": "string" },
+        "context": { "type": "object" },
+        "uid": { "type": "string", "description": "The user ID of the log owner." }
+      },
+      "required": ["id", "timestamp", "source", "message", "uid"]
+    },
+    "BlacklistedContact": {
+      "title": "BlacklistedContact",
+      "description": "A contact that should be excluded from future searches.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "e164_number": { "type": "string" },
+        "reason": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "uid": { "type": "string", "description": "The user ID of the blacklist owner." }
+      },
+      "required": ["id", "e164_number", "created_at", "uid"]
+    }
+  },
+  "firestore": {
+    "/jobs/{jobId}": {
+      "schema": "CrawlJob",
+      "description": "Collection of crawl jobs."
+    },
+    "/contacts/{contactId}": {
+      "schema": "Contact",
+      "description": "Collection of contacts found."
+    },
+    "/error_logs/{logId}": {
+      "schema": "ErrorLog",
+      "description": "Collection of error logs."
+    },
+    "/blacklist/{blacklistId}": {
+      "schema": "BlacklistedContact",
+      "description": "Collection of blacklisted contacts."
+    }
+  }
+}
