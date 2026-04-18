@@ -11,6 +11,20 @@ interface CrawlFormProps {
 
 const allSources: CrawlSource[] = ['google', 'instagram_via_search', 'linkedin_via_search', 'facebook_via_search', 'apify', 'firecrawl', 'google_maps', 'doctoralia_via_search', 'scrape_do'];
 
+const sourceLabels: Record<string, { label: string; isPremium?: boolean }> = {
+    google: { label: 'Google Search' },
+    google_maps: { label: 'Google Maps' },
+    instagram_via_search: { label: 'Instagram' },
+    linkedin_via_search: { label: 'LinkedIn' },
+    facebook_via_search: { label: 'Facebook' },
+    doctoralia_via_search: { label: 'Doctoralia' },
+    apify: { label: 'Apify (API)', isPremium: true },
+    firecrawl: { label: 'Firecrawl (API)', isPremium: true },
+    scrape_do: { label: 'Scrape.do (API)', isPremium: true },
+    bing: { label: 'Bing Search' },
+    openai_atlas: { label: 'OpenAI Atlas' }
+};
+
 const CrawlForm: React.FC<CrawlFormProps> = ({ onJobCreated }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -18,7 +32,7 @@ const CrawlForm: React.FC<CrawlFormProps> = ({ onJobCreated }) => {
     niche: '',
     city: '',
     ddd: '',
-    sources: ['google', 'instagram_via_search', 'linkedin_via_search', 'facebook_via_search', 'google_maps'],
+    sources: ['google', 'instagram_via_search', 'linkedin_via_search', 'facebook_via_search', 'google_maps', 'doctoralia_via_search'],
     use_proxies: false,
     proxy_url: '',
     proxy_rotation: 'none',
@@ -152,20 +166,37 @@ const CrawlForm: React.FC<CrawlFormProps> = ({ onJobCreated }) => {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">Fontes</label>
-          <div className="grid grid-cols-2 gap-2">
+          <label className="block text-sm font-medium text-gray-300 mb-2 flex items-center justify-between">
+            <span>Fontes de Extração</span>
+            <span className="text-[10px] text-gray-500 uppercase tracking-widest">Selecione Múltiplas</span>
+          </label>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
             {allSources.map(source => (
-              <label key={source} className="flex items-center space-x-2 bg-gray-700 p-2 rounded-md cursor-pointer hover:bg-gray-600 transition">
-                <input
-                  type="checkbox"
-                  checked={formData.sources.includes(source)}
-                  onChange={() => handleSourceChange(source)}
-                  className="h-4 w-4 rounded border-gray-500 bg-gray-600 text-sky-600 focus:ring-sky-500"
-                />
-                <span className="text-sm text-gray-200 capitalize">{source.replace(/_/g, ' ')}</span>
+              <label key={source} className={`flex flex-col p-2.5 rounded-xl cursor-pointer transition-all border ${
+                formData.sources.includes(source) 
+                ? 'bg-sky-900/20 border-sky-500 shadow-sm' 
+                : 'bg-gray-700/50 border-gray-600 hover:border-gray-500'
+              }`}>
+                <div className="flex items-center justify-between mb-1">
+                    <input
+                        type="checkbox"
+                        checked={formData.sources.includes(source)}
+                        onChange={() => handleSourceChange(source)}
+                        className="h-3.5 w-3.5 rounded border-gray-500 bg-gray-600 text-sky-600 focus:ring-sky-500"
+                    />
+                    {sourceLabels[source]?.isPremium && (
+                        <span className="text-[8px] font-bold text-yellow-500 bg-yellow-500/10 px-1 py-0.5 rounded border border-yellow-500/20 uppercase">API</span>
+                    )}
+                </div>
+                <span className={`text-[11px] font-medium leading-tight truncate ${formData.sources.includes(source) ? 'text-sky-300' : 'text-gray-400'}`}>
+                    {sourceLabels[source]?.label || source.replace(/_/g, ' ')}
+                </span>
               </label>
             ))}
           </div>
+          <p className="mt-3 text-[10px] text-gray-500 italic">
+            * Fontes (API) requerem chaves configuradas em Settings no topo da página.
+          </p>
         </div>
 
         <div className="border-t border-gray-700 pt-4">

@@ -195,26 +195,37 @@ const parseGeminiJsonResponse = (responseText: string | undefined | null): Gemin
 const isValidBrazilianMobileNumber = (phone: string | null | undefined): boolean => {
     if (!phone) return false;
     const digits = phone.replace(/\D/g, '');
-    // 55 + 2 digit DDD + (optional 9) + 8 digits
-    // Mobile: 55 + DDD + 9 + 8 digits (13 digits)
-    // Landline/Old Mobile: 55 + DDD + 8 digits (12 digits)
-    return /^55\d{2}9?\d{8}$/.test(digits);
+    
+    // Brazilian numbers should have 10 to 13 digits
+    // 10: DDD + 8 digits (Landline/Old Mobile)
+    // 11: DDD + 9 + 8 digits (Mobile)
+    // 12: 55 + DDD + 8 digits
+    // 13: 55 + DDD + 9 + 8 digits
+    
+    if (digits.length < 10 || digits.length > 13) return false;
+    
+    // If it has 12 or 13 digits, it MUST start with 55
+    if (digits.length >= 12 && !digits.startsWith('55')) return false;
+    
+    // If it has 10 or 11 digits, it's just DDD + Number
+    return true;
 };
 
 // --- Specialized Agents ---
 
 const getGoogleSearchAgent = async (params: CrawlJobParams): Promise<GeminiContact[]> => {
-    // Broader query to capture more directory-style results
-    const searchQuery = `"${params.niche}" "${params.city || 'Brasil'}" (whatsapp OR "celular" OR "contato") -site:instagram.com`;
+    // More flexible query
+    const searchQuery = `${params.niche} ${params.city || 'Brasil'} (whatsapp OR "celular" OR "contato")`;
     
-    const contactSearchPrompt = `Realize uma pesquisa no Google para encontrar empresas de: "${params.niche}" em "${params.city || 'Brasil'}".
+    const contactSearchPrompt = `Realize uma pesquisa exaustiva no Google para encontrar o máximo de empresas de: "${params.niche}" em "${params.city || 'Brasil'}".
     
     QUERY: ${searchQuery}
     
     TAREFA:
     1. Analise os resultados da busca (títulos e descrições).
     2. Identifique nomes de empresas e NÚMEROS DE WHATSAPP/CELULAR brasileiros.
-    3. Tente extrair pelo menos 10 contatos.
+    3. Tente extrair pelo menos 20 a 30 contatos únicos.
+    4. Se houver muitos resultados, liste os mais relevantes e ativos.
     
     SAÍDA OBRIGATÓRIA:
     Gere um bloco JSON com a seguinte estrutura:
@@ -245,16 +256,17 @@ const getGoogleSearchAgent = async (params: CrawlJobParams): Promise<GeminiConta
 
 const getInstagramSearchAgent = async (params: CrawlJobParams): Promise<GeminiContact[]> => {
     // Simplified Dorking for snippet visibility
-    const searchQuery = `site:instagram.com "${params.niche}" "${params.city || ''}" "whatsapp"`;
+    const searchQuery = `site:instagram.com "${params.niche}" "${params.city || ''}" whatsapp -inurl:directory`;
 
-    const contactSearchPrompt = `Pesquise no Google por perfis do Instagram.
+    const contactSearchPrompt = `Realize uma pesquisa exaustiva no Google por perfis do Instagram de "${params.niche}" no "${params.city || 'Brasil'}".
     
     QUERY: ${searchQuery}
 
     TAREFA:
-    1. Olhe para os snippets dos resultados de busca.
-    2. Procure por números de telefone no formato brasileiro ((xx) 9xxxx-xxxx) que aparecem na descrição/bio do Instagram.
-    3. Ignore perfis sem número de telefone visível.
+    1. Analise todos os snippets dos resultados de busca.
+    2. Extraia nomes e números de WhatsApp que aparecem na descrição/bio.
+    3. Tente encontrar pelo menos 20 contatos diferentes.
+    4. Ignore perfis sem número de telefone visível.
     
     SAÍDA OBRIGATÓRIA:
     Gere um bloco JSON:
@@ -285,12 +297,12 @@ const getInstagramSearchAgent = async (params: CrawlJobParams): Promise<GeminiCo
 const getGoogleMapsAgent = async (params: CrawlJobParams): Promise<GeminiContact[]> => {
     if (!params.city) return [];
     
-    const contactSearchPrompt = `Busque no Google Maps por "${params.niche}" em "${params.city}".
+    const contactSearchPrompt = `Busque no Google Maps por profissionais ou empresas de "${params.niche}" em "${params.city}".
     
     TAREFA:
-    1. Identifique pelo menos 10 estabelecimentos relevantes.
-    2. Extraia o nome, telefone e endereço (se disponível).
-    3. Priorize estabelecimentos que tenham número de telefone brasileiro.
+    1. Identifique pelo menos 20 a 25 estabelecimentos relevantes.
+    2. Extraia o nome, telefone (priorize celular/whatsapp) e endereço.
+    3. Se encontrar sites, tente identificar o whatsapp neles também.
     
     SAÍDA OBRIGATÓRIA:
     Gere um bloco JSON com a seguinte estrutura:
@@ -319,12 +331,13 @@ const getGoogleMapsAgent = async (params: CrawlJobParams): Promise<GeminiContact
 }
 
 const getDoctoraliaAgent = async (params: CrawlJobParams): Promise<GeminiContact[]> => {
-    const searchQuery = `site:doctoralia.com.br "${params.niche}" "${params.city || ''}" whatsapp`;
-    const contactSearchPrompt = `Pesquise perfis no Doctoralia usando a query: "${searchQuery}".
+    const searchQuery = `site:doctoralia.com.br ${params.niche} ${params.city || ''} whatsapp`;
+    const contactSearchPrompt = `Realize uma pesquisa exaustiva no Doctoralia para encontrar profissionais de "${params.niche}" em "${params.city || 'Brasil'}".
     
     TAREFA:
-    1. Identifique profissionais.
+    1. Identifique o máximo de profissionais relevantes.
     2. Extraia números de contato visíveis nos snippets de busca.
+    3. Tente extrair pelo menos 30 contatos únicos.
     
     SAÍDA:
     Bloco JSON com a chave "contacts".
@@ -347,11 +360,12 @@ const getDoctoraliaAgent = async (params: CrawlJobParams): Promise<GeminiContact
 
 const getLinkedInSearchAgent = async (params: CrawlJobParams): Promise<GeminiContact[]> => {
     const searchQuery = `site:linkedin.com/in/ OR site:linkedin.com/company/ "${params.niche}" "${params.city || ''}" whatsapp`;
-    const contactSearchPrompt = `Pesquise perfis no LinkedIn usando a query: "${searchQuery}".
+    const contactSearchPrompt = `Realize uma pesquisa exaustiva no LinkedIn para encontrar empresas ou profissionais de "${params.niche}" em "${params.city || 'Brasil'}".
     
     TAREFA:
-    1. Identifique profissionais ou empresas.
-    2. Extraia números de contato visíveis nos snippets de busca.
+    1. Identifique perfis ou páginas de empresas.
+    2. Extraia números de contato visíveis nos snippets.
+    3. Tente extrair pelo menos 20 contatos.
     
     SAÍDA:
     Bloco JSON com a chave "contacts".
@@ -373,12 +387,13 @@ const getLinkedInSearchAgent = async (params: CrawlJobParams): Promise<GeminiCon
 };
 
 const getFacebookSearchAgent = async (params: CrawlJobParams): Promise<GeminiContact[]> => {
-    const searchQuery = `site:facebook.com "${params.niche}" "${params.city || ''}" whatsapp`;
-    const contactSearchPrompt = `Pesquise perfis no Facebook usando a query: "${searchQuery}".
+    const searchQuery = `site:facebook.com "${params.niche}" "${params.city || ''}" "whatsapp"`;
+    const contactSearchPrompt = `Realize uma pesquisa exaustiva no Facebook para encontrar empresas de "${params.niche}" em "${params.city || 'Brasil'}".
     
     TAREFA:
-    1. Identifique páginas ou perfis.
-    2. Extraia números de contato visíveis nos snippets de busca.
+    1. Identifique páginas de negócios ou perfis profissionais.
+    2. Extraia números de contato visíveis nos snippets da busca.
+    3. Tente extrair pelo menos 20 contatos.
     
     SAÍDA:
     Bloco JSON com a chave "contacts".
@@ -402,7 +417,9 @@ const getFacebookSearchAgent = async (params: CrawlJobParams): Promise<GeminiCon
 const getApifyAgent = async (params: CrawlJobParams): Promise<GeminiContact[]> => {
     const apiKey = (process.env as any).APIFY_API_KEY;
     if (!apiKey) {
-        console.warn("Apify API Key not found. Skipping Apify source.");
+        const msg = "APIFY_API_KEY não encontrada. Por favor, configure sua chave Apify nas configurações para usar esta fonte.";
+        console.warn(msg);
+        CrawlerLogger.logError("ApifyAgent", msg, { params });
         return [];
     }
 
@@ -414,8 +431,8 @@ const getApifyAgent = async (params: CrawlJobParams): Promise<GeminiContact[]> =
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 queries: `${params.niche} ${params.city || ''} whatsapp`,
-                maxPagesPerQuery: 1,
-                resultsPerPage: 10,
+                maxPagesPerQuery: params.max_pages_per_source || 2,
+                resultsPerPage: 20,
                 mobileResults: true
             })
         });
@@ -456,7 +473,9 @@ const getApifyAgent = async (params: CrawlJobParams): Promise<GeminiContact[]> =
 const getFirecrawlAgent = async (params: CrawlJobParams): Promise<GeminiContact[]> => {
     const apiKey = (process.env as any).FIRECRAWL_API_KEY;
     if (!apiKey) {
-        console.warn("Firecrawl API Key not found. Skipping Firecrawl source.");
+        const msg = "FIRECRAWL_API_KEY não encontrada. Por favor, configure sua chave Firecrawl nas configurações para usar esta fonte.";
+        console.warn(msg);
+        CrawlerLogger.logError("FirecrawlAgent", msg, { params });
         return [];
     }
 
@@ -469,7 +488,7 @@ const getFirecrawlAgent = async (params: CrawlJobParams): Promise<GeminiContact[
             },
             body: JSON.stringify({
                 query: `${params.niche} ${params.city || ''} whatsapp`,
-                limit: 5,
+                limit: (params.max_pages_per_source || 2) * 10,
                 lang: 'pt-BR'
             })
         });
@@ -501,40 +520,64 @@ const getFirecrawlAgent = async (params: CrawlJobParams): Promise<GeminiContact[
 
 
 const getScrapeDoAgent = async (params: CrawlJobParams): Promise<GeminiContact[]> => {
+    // Note: The token below is a fallback, users should use their own
     const token = process.env.SCRAPE_DO_TOKEN || "49d2cd42c1374d9a9bd0e741bd2fb43f348015dd31a";
     const searchQuery = `"${params.niche}" "${params.city || 'Brasil'}" (whatsapp OR "celular" OR "contato")`;
-    const targetUrl = `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}`;
     
-    try {
-        const scrapeDoUrl = `https://api.scrape.do?token=${token}&url=${encodeURIComponent(targetUrl)}&geoCode=br`;
-        const proxiedUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(scrapeDoUrl)}`;
-        
-        const response = await fetch(proxiedUrl);
-        
-        if (!response.ok) throw new Error(`Scrape.do error: ${response.statusText}`);
-        
-        const html = await response.text();
-        
-        // Strip out some HTML to reduce payload size, or just pass a chunk
-        const textToAnalyze = html.substring(0, 40000); 
-        
-        const extractionPrompt = `Extraia nomes de empresas e números de WhatsApp brasileiros do seguinte HTML de resultados de busca:
-        
-        ${textToAnalyze}
-        
-        SAÍDA OBRIGATÓRIA:
-        Gere um bloco JSON com a chave "contacts".`;
+    let allContacts: GeminiContact[] = [];
+    const maxPages = params.max_pages_per_source || 1;
 
-        const geminiResponse = await ai.models.generateContent({
-            model: "gemini-3-flash-preview",
-            contents: extractionPrompt,
-        });
+    for (let page = 0; page < maxPages; page++) {
+        const start = page * 10;
+        const targetUrl = `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}&start=${start}`;
+        
+        try {
+            const scrapeDoUrl = `https://api.scrape.do?token=${token}&url=${encodeURIComponent(targetUrl)}&geoCode=br`;
+            const proxiedUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(scrapeDoUrl)}`;
+            
+            const response = await fetch(proxiedUrl);
+            
+            if (!response.ok) {
+                if (response.status === 401 || response.status === 403) {
+                    throw new Error(`Token do Scrape.do inválido ou expirado. Verifique seu SCRAPE_DO_TOKEN.`);
+                }
+                throw new Error(`Scrape.do error: ${response.statusText}`);
+            }
+            
+            const html = await response.text();
+            
+            if (html.includes("detected unusual traffic") || html.includes("captcha")) {
+                console.warn(`[Scrape.do] Bloqueio detectado na página ${page + 1}.`);
+                break;
+            }
 
-        return parseGeminiJsonResponse(geminiResponse.text);
-    } catch (error) {
-        CrawlerLogger.logError("ScrapeDoAgent", error, { params });
-        return [];
+            const textToAnalyze = html.substring(0, 40000); 
+            
+            const extractionPrompt = `Extraia nomes de empresas e números de WhatsApp brasileiros do seguinte HTML de resultados de busca (Página ${page + 1}):
+            
+            ${textToAnalyze}
+            
+            SAÍDA OBRIGATÓRIA:
+            Gere um bloco JSON com a chave "contacts".`;
+
+            const geminiResponse = await ai.models.generateContent({
+                model: "gemini-3-flash-preview",
+                contents: extractionPrompt,
+            });
+
+            const contacts = parseGeminiJsonResponse(geminiResponse.text);
+            allContacts = [...allContacts, ...contacts];
+
+            if (contacts.length < 3) break; // Most likely end of results
+            if (page < maxPages - 1) await new Promise(r => setTimeout(r, 1000));
+
+        } catch (error) {
+            CrawlerLogger.logError("ScrapeDoAgent", error, { params, page });
+            break;
+        }
     }
+
+    return allContacts;
 };
 
 const withTimeout = <T>(promise: Promise<T>, ms: number, sourceName: string): Promise<T> => {
@@ -595,7 +638,7 @@ export const startCrawl = async (params: CrawlJobParams): Promise<CrawlJob> => {
     try {
         const agentPromises: Promise<{ contacts: GeminiContact[], sourceType: CrawlSource }>[] = [];
 
-        const TIMEOUT_MS = 60000; // 60 seconds per agent
+        const TIMEOUT_MS = 90000; // 90 seconds per agent
 
         if (params.sources.includes('google')) {
             agentPromises.push(withTimeout(getGoogleSearchAgent(params), TIMEOUT_MS, 'google').then(c => ({ contacts: c, sourceType: 'google' })));
@@ -649,8 +692,13 @@ export const startCrawl = async (params: CrawlJobParams): Promise<CrawlJob> => {
         const uniqueContactsMap = new Map<string, typeof allContactsData[0]>();
         
         allContactsData.forEach(contact => {
-             const phoneDigits = String(contact.e164_number || '').replace(/\D/g, '');
+             let phoneDigits = String(contact.e164_number || '').replace(/\D/g, '');
              
+             // Remove leading zero if present (e.g., 081... -> 81...)
+             if (phoneDigits.startsWith('0') && (phoneDigits.length === 11 || phoneDigits.length === 12)) {
+                 phoneDigits = phoneDigits.substring(1);
+             }
+
              // Normalize to 55...
              let fullNumberToCheck = phoneDigits;
              // Heuristic: If 10 or 11 digits (DDD + number), assume BR and prepend 55
@@ -658,8 +706,16 @@ export const startCrawl = async (params: CrawlJobParams): Promise<CrawlJob> => {
                  fullNumberToCheck = '55' + phoneDigits;
              }
              
+             // Final check: if it's 12 or 13 digits but doesn't start with 55, it might be a wrong number or another country
+             // But since we are targeting Brazil, we prioritize 55
+             
              // Validate
              if (isValidBrazilianMobileNumber(fullNumberToCheck)) {
+                 // Ensure it has 55 prefix for the map key
+                 if (fullNumberToCheck.length === 10 || fullNumberToCheck.length === 11) {
+                     fullNumberToCheck = '55' + fullNumberToCheck;
+                 }
+
                  if (!uniqueContactsMap.has(fullNumberToCheck)) {
                     // Update contact number to normalized version
                     contact.e164_number = '+' + fullNumberToCheck; 
