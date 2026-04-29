@@ -1,5 +1,5 @@
 {
-  "name": "Scalable Contact Crawler",
-  "description": "A web interface to manage a scalable crawler that finds public WhatsApp contacts from various sources based on a defined niche. It allows users to configure, run, and monitor crawling jobs, view extracted contacts, and send messages.",
+  "name": "Omnichannel Outreach Pro",
+  "description": "Plataforma completa de prospecção e outreach omnichannel. Extraia leads, importe listas e automatize campanhas.",
   "requestFramePermissions": []
 }

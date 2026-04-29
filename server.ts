@@ -11,8 +11,43 @@ async function startServer() {
   const PORT = 3000;
 
   // API routes
+  app.use(express.json({ limit: '10mb' }));
+
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
+  });
+
+  app.post("/api/proxy", async (req, res) => {
+    const { url, method = "GET", headers = {}, body = null } = req.body;
+    if (!url) {
+      return res.status(400).json({ error: "URL is required" });
+    }
+
+    try {
+      console.log(`[Proxy] ${method} ${url}`);
+      const response = await fetch(url, {
+        method,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          ...headers,
+        },
+        body: body ? JSON.stringify(body) : null,
+      });
+
+      const contentType = response.headers.get("content-type");
+      const status = response.status;
+      
+      if (contentType && contentType.includes("application/json")) {
+        const data = await response.json();
+        res.status(status).json(data);
+      } else {
+        const text = await response.text();
+        res.status(status).send(text);
+      }
+    } catch (error: any) {
+      console.error(`[Proxy Error] ${url}:`, error);
+      res.status(500).json({ error: error.message });
+    }
   });
 
   // Vite middleware for development

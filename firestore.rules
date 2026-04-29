@@ -99,18 +99,19 @@ service cloud.firestore {
       return hasRequiredFields(['id', 'niche', 'sources', 'status', 'created_at', 'uid']) &&
              data.id is string && data.id.size() > 0 &&
              data.niche is string && data.niche.size() > 0 && data.niche.size() < 100 &&
-             data.sources is list && data.sources.size() > 0 && data.sources.size() <= 10 &&
+             data.sources is list && data.sources.size() > 0 && data.sources.size() <= 20 &&
              data.status in ['pending', 'running', 'completed', 'failed'] &&
-             data.contacts_found is number &&
+             (!('contacts_found' in data) || data.contacts_found is number) &&
              data.created_at is timestamp &&
-             data.uid is string && data.uid == request.auth.uid;
+             data.uid is string && data.uid == request.auth.uid &&
+             (!('direct_url' in data) || (data.direct_url == null || (data.direct_url is string && data.direct_url.size() < 500)));
     }
 
     function isValidContact(data) {
-      return hasRequiredFields(['id', 'e164_number', 'raw_number', 'job_id', 'found_at', 'uid']) &&
+      return hasRequiredFields(['id', 'job_id', 'found_at', 'uid']) &&
              data.id is string && data.id.size() > 0 &&
-             data.e164_number is string && data.e164_number.size() > 0 && data.e164_number.size() < 20 &&
-             data.raw_number is string && data.raw_number.size() > 0 && data.raw_number.size() < 30 &&
+             (!('e164_number' in data) || (data.e164_number is string && data.e164_number.size() > 0 && data.e164_number.size() < 40)) &&
+             (!('raw_number' in data) || (data.raw_number is string && data.raw_number.size() > 0 && data.raw_number.size() < 60)) &&
              data.job_id is string && data.job_id.size() > 0 &&
              data.found_at is timestamp &&
              data.uid is string && data.uid == request.auth.uid;
@@ -133,9 +134,33 @@ service cloud.firestore {
              data.uid is string && data.uid == request.auth.uid;
     }
 
+    function isValidCampaign(data) {
+      return hasRequiredFields(['id', 'name', 'channel', 'status', 'created_at', 'uid']) &&
+             data.uid == request.auth.uid;
+    }
+
+    function isValidTemplate(data) {
+      return hasRequiredFields(['id', 'name', 'base_content', 'channel', 'uid']) &&
+             data.uid == request.auth.uid;
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
+
+    match /campaigns/{campaignId} {
+      allow read: if isOwner(resource.data.uid) || isAdmin();
+      allow create: if isAuthenticated() && isValidCampaign(request.resource.data);
+      allow update: if isAuthenticated() && (isDocOwner() || isAdmin()) && uidNotModified();
+      allow delete: if (isDocOwner() || isAdmin());
+    }
+
+    match /templates/{templateId} {
+      allow read: if isOwner(resource.data.uid) || isAdmin();
+      allow create: if isAuthenticated() && isValidTemplate(request.resource.data);
+      allow update: if isAuthenticated() && (isDocOwner() || isAdmin()) && uidNotModified();
+      allow delete: if (isDocOwner() || isAdmin());
+    }
 
     match /jobs/{jobId} {
       allow read: if isOwner(resource.data.uid) || isAdmin();

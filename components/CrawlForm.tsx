@@ -4,20 +4,24 @@ import { CrawlJob, CrawlJobParams, CrawlSource } from '../types';
 import { startCrawl } from '../services/crawlerService';
 import { PlayIcon } from './icons/PlayIcon';
 import { LoaderIcon } from './icons/LoaderIcon';
+import { SparklesIcon, MapPinIcon, GlobeIcon, ListPlusIcon, SearchIcon } from 'lucide-react';
+import { InstagramIcon as InstaIcon } from './icons/InstagramIcon';
+import { LinkedInIcon as Linkedin } from './icons/LinkedInIcon';
 
 interface CrawlFormProps {
   onJobCreated: (newJob: CrawlJob) => void;
 }
 
-const allSources: CrawlSource[] = ['google', 'instagram_via_search', 'linkedin_via_search', 'facebook_via_search', 'apify', 'firecrawl', 'google_maps', 'doctoralia_via_search', 'scrape_do'];
+const allSources: CrawlSource[] = ['google', 'instagram_via_search', 'linkedin_via_search', 'facebook_via_search', 'apify', 'firecrawl', 'google_maps', 'doctoralia_via_search', 'doctoralia_direct', 'scrape_do'];
 
-const sourceLabels: Record<string, { label: string; isPremium?: boolean }> = {
-    google: { label: 'Google Search' },
-    google_maps: { label: 'Google Maps' },
-    instagram_via_search: { label: 'Instagram' },
-    linkedin_via_search: { label: 'LinkedIn' },
+const sourceLabels: Record<string, { label: string; isPremium?: boolean; icon?: React.ReactNode }> = {
+    google: { label: 'Google Search', icon: <GlobeIcon size={12} /> },
+    google_maps: { label: 'Google Maps', icon: <MapPinIcon size={12} /> },
+    instagram_via_search: { label: 'Instagram', icon: <InstaIcon size={12} /> },
+    linkedin_via_search: { label: 'LinkedIn', icon: <Linkedin size={12} /> },
     facebook_via_search: { label: 'Facebook' },
-    doctoralia_via_search: { label: 'Doctoralia' },
+    doctoralia_via_search: { label: 'Doctoralia (Google)', icon: <SearchIcon size={12} /> },
+    doctoralia_direct: { label: 'Doctoralia (Direto)', icon: <SparklesIcon size={12} />, isPremium: true },
     apify: { label: 'Apify (API)', isPremium: true },
     firecrawl: { label: 'Firecrawl (API)', isPremium: true },
     scrape_do: { label: 'Scrape.do (API)', isPremium: true },
@@ -25,10 +29,18 @@ const sourceLabels: Record<string, { label: string; isPremium?: boolean }> = {
     openai_atlas: { label: 'OpenAI Atlas' }
 };
 
+const presets = [
+    { id: 'all', label: 'Busca Completa', icon: <SparklesIcon size={14} />, sources: ['google', 'instagram_via_search', 'linkedin_via_search', 'facebook_via_search', 'google_maps', 'doctoralia_via_search'] },
+    { id: 'instagram', label: 'Só Instagram', icon: <InstaIcon size={14} />, sources: ['instagram_via_search'] },
+    { id: 'linkedin', label: 'Só LinkedIn', icon: <Linkedin size={14} />, sources: ['linkedin_via_search'] },
+    { id: 'local', label: 'Local (Maps)', icon: <MapPinIcon size={14} />, sources: ['google_maps', 'google'] },
+];
+
 const CrawlForm: React.FC<CrawlFormProps> = ({ onJobCreated }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState<Omit<CrawlJobParams, 'rate_limit' | 'run_mode'>>({
+    name: '',
     niche: '',
     city: '',
     ddd: '',
@@ -38,6 +50,7 @@ const CrawlForm: React.FC<CrawlFormProps> = ({ onJobCreated }) => {
     proxy_rotation: 'none',
     max_pages_per_source: 10,
     schedule: 'once',
+    direct_url: '',
   });
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -47,6 +60,10 @@ const CrawlForm: React.FC<CrawlFormProps> = ({ onJobCreated }) => {
       [name]: type === 'checkbox' ? (e.target as HTMLInputElement).checked : value,
     }));
     setError(null);
+  };
+
+  const applyPreset = (sources: CrawlSource[]) => {
+      setFormData(prev => ({ ...prev, sources }));
   };
 
   const handleSourceChange = (source: CrawlSource) => {
@@ -69,7 +86,6 @@ const CrawlForm: React.FC<CrawlFormProps> = ({ onJobCreated }) => {
     setIsSubmitting(true);
     setError(null);
     try {
-      // Re-add non-interactive params for the service call
       const fullParams: CrawlJobParams = {
           ...formData,
           rate_limit: 60,
@@ -77,9 +93,9 @@ const CrawlForm: React.FC<CrawlFormProps> = ({ onJobCreated }) => {
       }
       const newJob = await startCrawl(fullParams);
       onJobCreated(newJob);
-      // Reset text fields for the next job
       setFormData(prev => ({
-          ...prev, // Keep sources
+          ...prev,
+          name: '',
           niche: '',
           city: '',
           ddd: '',
@@ -93,83 +109,123 @@ const CrawlForm: React.FC<CrawlFormProps> = ({ onJobCreated }) => {
   };
 
   return (
-    <div className="bg-gray-800 p-6 rounded-lg shadow-xl h-full">
-      <h2 className="text-2xl font-bold text-white mb-6 border-b border-gray-700 pb-4">Criar Novo Job</h2>
+    <div className="bg-gray-800 p-6 rounded-2xl shadow-xl h-full border border-gray-700">
+      <h2 className="text-2xl font-bold text-white mb-6 border-b border-gray-700 pb-4 flex items-center gap-3">
+        <ListPlusIcon className="text-sky-400" /> Criar Novo Job
+      </h2>
       {error && (
-        <div className="mb-4 p-3 bg-red-900/50 border border-red-500 rounded text-red-200 text-sm">
+        <div className="mb-4 p-3 bg-red-900/50 border border-red-500 rounded-xl text-red-200 text-sm animate-pulse">
           {error}
         </div>
       )}
       <form onSubmit={handleSubmit} className="space-y-6">
-        <div>
-          <label htmlFor="niche" className="block text-sm font-medium text-gray-300 mb-1">Nicho</label>
-          <input
-            type="text"
-            name="niche"
-            id="niche"
-            value={formData.niche}
-            onChange={handleInputChange}
-            className="w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
-            placeholder="ex: clínica veterinária"
-            required
-            maxLength={99}
-          />
+        <div className="space-y-4">
+            <div>
+              <label htmlFor="name" className="block text-[10px] font-bold text-gray-500 uppercase mb-2 tracking-widest ml-1">Nome do Job (Opcional)</label>
+              <input
+                type="text"
+                name="name"
+                id="name"
+                value={formData.name}
+                onChange={handleInputChange}
+                className="w-full bg-gray-900 border border-gray-700 rounded-xl py-2.5 px-4 text-white focus:outline-none focus:ring-2 focus:ring-sky-500 shadow-inner transition-all"
+                placeholder="Ex: Leads Médicos RJ - Instagram"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="niche" className="block text-[10px] font-bold text-gray-500 uppercase mb-2 tracking-widest ml-1">Nicho / Palavra-Chave</label>
+              <input
+                type="text"
+                name="niche"
+                id="niche"
+                value={formData.niche}
+                onChange={handleInputChange}
+                className="w-full bg-gray-900 border border-gray-700 rounded-xl py-2.5 px-4 text-white focus:outline-none focus:ring-2 focus:ring-sky-500 shadow-inner transition-all"
+                placeholder="ex: clínica veterinária"
+                required
+                maxLength={99}
+              />
+            </div>
+
+            <div>
+              <label htmlFor="direct_url" className="block text-[10px] font-bold text-gray-500 uppercase mb-2 tracking-widest ml-1">URL Direta (Opcional - p/ Doctoralia Direto)</label>
+              <input
+                type="url"
+                name="direct_url"
+                id="direct_url"
+                value={formData.direct_url}
+                onChange={handleInputChange}
+                className="w-full bg-gray-900 border border-gray-700 rounded-xl py-2.5 px-4 text-white focus:outline-none focus:ring-2 focus:ring-sky-500 shadow-inner transition-all text-xs"
+                placeholder="https://www.doctoralia.com.br/pesquisa?q=..."
+              />
+              <p className="text-[9px] text-gray-500 mt-1 ml-1 italic">Cole o link da página de resultados do seu navegador para uma busca semi-automática.</p>
+            </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="city" className="block text-sm font-medium text-gray-300 mb-1">Cidade (Opcional)</label>
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="lg:col-span-2">
+              <label htmlFor="city" className="block text-[10px] font-bold text-gray-500 uppercase mb-2 tracking-widest ml-1">Cidade</label>
               <input
                 type="text"
                 name="city"
                 id="city"
                 value={formData.city}
                 onChange={handleInputChange}
-                className="w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
+                className="w-full bg-gray-900 border border-gray-700 rounded-xl py-2.5 px-4 text-white focus:outline-none focus:ring-2 focus:ring-sky-500 shadow-inner transition-all"
                 placeholder="ex: São Paulo"
                 maxLength={99}
               />
             </div>
             <div>
-              <label htmlFor="schedule" className="block text-sm font-medium text-gray-300 mb-1">Agendamento</label>
+              <label htmlFor="ddd" className="block text-[10px] font-bold text-gray-500 uppercase mb-2 tracking-widest ml-1">DDD (Opcional)</label>
+              <input
+                type="text"
+                name="ddd"
+                id="ddd"
+                value={formData.ddd || ''}
+                onChange={handleInputChange}
+                className="w-full bg-gray-900 border border-gray-700 rounded-xl py-2.5 px-4 text-white focus:outline-none focus:ring-2 focus:ring-sky-500 shadow-inner transition-all"
+                placeholder="ex: 11"
+                maxLength={3}
+              />
+            </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4">
+            <div>
+              <label htmlFor="schedule" className="block text-[10px] font-bold text-gray-500 uppercase mb-2 tracking-widest ml-1">Frequência</label>
               <select
                 name="schedule"
                 id="schedule"
                 value={formData.schedule}
                 onChange={handleInputChange}
-                className="w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
+                className="w-full bg-gray-900 border border-gray-700 rounded-xl py-2.5 px-4 text-white focus:outline-none focus:ring-2 focus:ring-sky-500 shadow-inner transition-all cursor-pointer"
               >
                 <option value="once">Executar Agora</option>
-                <option value="daily">Diário</option>
-                <option value="weekly">Semanal</option>
-                <option value="monthly">Mensal</option>
+                <option value="daily">Diário (Recorrente)</option>
+                <option value="weekly">Semanal (Recorrente)</option>
+                <option value="monthly">Mensal (Recorrente)</option>
               </select>
             </div>
         </div>
 
         <div>
-          <label htmlFor="max_pages_per_source" className="block text-sm font-medium text-gray-300 mb-1">
-            Profundidade da Busca (Páginas por Fonte): <span className="text-sky-400 font-bold">{formData.max_pages_per_source}</span>
-          </label>
-          <input
-            type="range"
-            name="max_pages_per_source"
-            id="max_pages_per_source"
-            min="1"
-            max="50"
-            step="1"
-            value={formData.max_pages_per_source}
-            onChange={(e) => setFormData(prev => ({ ...prev, max_pages_per_source: parseInt(e.target.value) }))}
-            className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-sky-500"
-          />
-          <p className="mt-1 text-xs text-gray-400">Quanto maior o número, mais completa e lenta será a busca.</p>
-        </div>
+          <label className="block text-[10px] font-bold text-gray-500 uppercase mb-3 tracking-widest ml-1">Atalhos de Fontes (Presets)</label>
+          <div className="flex flex-wrap gap-2 mb-4">
+            {presets.map(p => (
+                <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => applyPreset(p.sources as CrawlSource[])}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded-full text-[10px] font-bold text-gray-300 transition-all border border-gray-600 hover:border-sky-500/50"
+                >
+                    {p.icon} {p.label}
+                </button>
+            ))}
+          </div>
 
-        <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2 flex items-center justify-between">
-            <span>Fontes de Extração</span>
-            <span className="text-[10px] text-gray-500 uppercase tracking-widest">Selecione Múltiplas</span>
-          </label>
+          <label className="block text-[10px] font-bold text-gray-500 uppercase mb-3 tracking-widest ml-1">Fontes Específicas</label>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
             {allSources.map(source => (
               <label key={source} className={`flex flex-col p-2.5 rounded-xl cursor-pointer transition-all border ${
@@ -182,11 +238,14 @@ const CrawlForm: React.FC<CrawlFormProps> = ({ onJobCreated }) => {
                         type="checkbox"
                         checked={formData.sources.includes(source)}
                         onChange={() => handleSourceChange(source)}
-                        className="h-3.5 w-3.5 rounded border-gray-500 bg-gray-600 text-sky-600 focus:ring-sky-500"
+                        className="h-3.5 w-3.5 rounded border-gray-500 bg-gray-600 text-sky-600 focus:ring-sky-500 shadow-none"
                     />
-                    {sourceLabels[source]?.isPremium && (
-                        <span className="text-[8px] font-bold text-yellow-500 bg-yellow-500/10 px-1 py-0.5 rounded border border-yellow-500/20 uppercase">API</span>
-                    )}
+                    <div className="flex items-center gap-1">
+                        {sourceLabels[source]?.icon && <span className="text-gray-500">{sourceLabels[source].icon}</span>}
+                        {sourceLabels[source]?.isPremium && (
+                            <span className="text-[8px] font-bold text-yellow-500 bg-yellow-500/10 px-1 py-0.5 rounded border border-yellow-500/20 uppercase">API</span>
+                        )}
+                    </div>
                 </div>
                 <span className={`text-[11px] font-medium leading-tight truncate ${formData.sources.includes(source) ? 'text-sky-300' : 'text-gray-400'}`}>
                     {sourceLabels[source]?.label || source.replace(/_/g, ' ')}
@@ -194,13 +253,28 @@ const CrawlForm: React.FC<CrawlFormProps> = ({ onJobCreated }) => {
               </label>
             ))}
           </div>
-          <p className="mt-3 text-[10px] text-gray-500 italic">
-            * Fontes (API) requerem chaves configuradas em Settings no topo da página.
-          </p>
         </div>
 
-        <div className="border-t border-gray-700 pt-4">
-          <label className="flex items-center space-x-2 cursor-pointer mb-4">
+        <div>
+          <label htmlFor="max_pages_per_source" className="block text-[10px] font-bold text-gray-500 uppercase mb-3 tracking-widest ml-1 flex justify-between">
+            <span>Profundidade: <span className="text-sky-400">{formData.max_pages_per_source} páginas</span></span>
+          </label>
+          <input
+            type="range"
+            name="max_pages_per_source"
+            id="max_pages_per_source"
+            min="1"
+            max="50"
+            step="1"
+            value={formData.max_pages_per_source}
+            onChange={(e) => setFormData(prev => ({ ...prev, max_pages_per_source: parseInt(e.target.value) }))}
+            className="w-full h-1.5 bg-gray-900 rounded-lg appearance-none cursor-pointer accent-sky-500 mb-2"
+          />
+          <p className="text-[10px] text-gray-500 italic leading-tight">Quanto maior, mais leads, mas o tempo de execução aumenta.</p>
+        </div>
+
+        <div className="border-t border-gray-700 pt-6">
+          <label className="flex items-center space-x-3 cursor-pointer mb-6 group">
             <input
               type="checkbox"
               name="use_proxies"
@@ -208,35 +282,35 @@ const CrawlForm: React.FC<CrawlFormProps> = ({ onJobCreated }) => {
               onChange={handleInputChange}
               className="h-4 w-4 rounded border-gray-500 bg-gray-600 text-sky-600 focus:ring-sky-500"
             />
-            <span className="text-sm font-medium text-gray-300">Usar Proxy Rotativo</span>
+            <span className="text-sm font-bold text-gray-300 group-hover:text-white transition-colors">Usar Proxy Rotativo (Opcional)</span>
           </label>
 
           {formData.use_proxies && (
-            <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
+            <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300 bg-gray-900/40 p-4 rounded-2xl border border-gray-700 shadow-inner mb-6">
               <div>
-                <label htmlFor="proxy_url" className="block text-sm font-medium text-gray-300 mb-1">URL do Proxy (HTTP/HTTPS)</label>
+                <label htmlFor="proxy_url" className="block text-[10px] font-bold text-gray-500 uppercase mb-2 tracking-widest">URL do Proxy</label>
                 <input
                   type="text"
                   name="proxy_url"
                   id="proxy_url"
                   value={formData.proxy_url}
                   onChange={handleInputChange}
-                  className="w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
-                  placeholder="ex: http://user:pass@proxy.com:8080"
+                  className="w-full bg-gray-800 border border-gray-700 rounded-xl py-2 px-3 text-white text-xs"
+                  placeholder="http://user:pass@proxy.com:8080"
                 />
               </div>
               <div>
-                <label htmlFor="proxy_rotation" className="block text-sm font-medium text-gray-300 mb-1">Rotação de Proxy</label>
+                <label htmlFor="proxy_rotation" className="block text-[10px] font-bold text-gray-500 uppercase mb-2 tracking-widest">Rotação</label>
                 <select
                   name="proxy_rotation"
                   id="proxy_rotation"
                   value={formData.proxy_rotation}
                   onChange={handleInputChange}
-                  className="w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  className="w-full bg-gray-800 border border-gray-700 rounded-xl py-2 px-3 text-white text-xs border-r-8 border-r-transparent"
                 >
-                  <option value="none">Sem Rotação Automática</option>
-                  <option value="per_request">Rotacionar por Requisição</option>
-                  <option value="per_job">Rotacionar por Job</option>
+                  <option value="none">Sem Rotação</option>
+                  <option value="per_request">Por Requisição</option>
+                  <option value="per_job">Por Job</option>
                 </select>
               </div>
             </div>
@@ -246,10 +320,10 @@ const CrawlForm: React.FC<CrawlFormProps> = ({ onJobCreated }) => {
         <button
           type="submit"
           disabled={isSubmitting}
-          className="w-full flex justify-center items-center bg-sky-600 hover:bg-sky-700 disabled:bg-sky-800 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-lg shadow-lg transition duration-300 ease-in-out transform hover:scale-105"
+          className="w-full flex justify-center items-center bg-gradient-to-r from-sky-600 to-sky-700 hover:from-sky-500 hover:to-sky-600 disabled:from-gray-700 disabled:to-gray-800 disabled:cursor-not-allowed text-white font-black py-4 px-6 rounded-2xl shadow-xl transition-all transform hover:scale-[1.02] active:scale-[0.98] tracking-widest uppercase text-xs"
         >
           {isSubmitting ? <LoaderIcon /> : <PlayIcon />}
-          <span className="ml-2">{isSubmitting ? 'Iniciando Job...' : 'Iniciar Crawl'}</span>
+          <span className="ml-3">{isSubmitting ? 'Explorando a Web...' : 'Lançar Crawl Master'}</span>
         </button>
       </form>
     </div>

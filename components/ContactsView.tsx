@@ -1,6 +1,7 @@
+import { Avatar } from './Avatar';
 import React, { useState, useEffect, useMemo } from 'react';
 import { Contact, CrawlJob, CrawlSource } from '../types';
-import { getContacts, getJobs, deleteContacts, addToBlacklist, deleteJob, updateContact, enrichContact } from '../services/crawlerService';
+import { getContacts, getJobs, deleteContacts, addToBlacklist, deleteJob, updateContact, enrichContact, updateJobName } from '../services/crawlerService';
 import { LoaderIcon } from './icons/LoaderIcon';
 import SendMessageModal from './SendMessageModal';
 import ConfirmationModal from './ConfirmationModal';
@@ -8,8 +9,10 @@ import { DownloadIcon } from './icons/DownloadIcon';
 import { BackIcon } from './icons/BackIcon';
 import { TrashIcon } from './icons/TrashIcon';
 import { GoogleIcon } from './icons/GoogleIcon';
-import { SparklesIcon, MailIcon, InfoIcon, StarIcon, BuildingIcon, UserIcon, BrainCircuitIcon } from 'lucide-react';
+import { SparklesIcon, MailIcon, InfoIcon, StarIcon, BuildingIcon, UserIcon, BrainCircuitIcon, Edit2Icon, CheckIcon, XIcon, PlusIcon, UploadIcon, PhoneIcon } from 'lucide-react';
 import ContactDetailsModal from './ContactDetailsModal';
+import ImportContactsModal from './ImportContactsModal';
+import AddContactModal from './AddContactModal';
 import { InstagramIcon } from './icons/InstagramIcon';
 import { GoogleMapsIcon } from './icons/GoogleMapsIcon';
 import { DoctoraliaIcon } from './icons/DoctoraliaIcon';
@@ -90,12 +93,16 @@ const SourceDisplay: React.FC<{ sourceType: CrawlSource; sourceUrl: string }> = 
     );
 };
 
-const ContactsView: React.FC = () => {
-  const [jobs, setJobs] = useState<CrawlJob[]>([]);
+interface ContactsViewProps {
+  jobs: CrawlJob[];
+  onJobsUpdate: () => void;
+}
+
+const ContactsView: React.FC<ContactsViewProps> = ({ jobs, onJobsUpdate }) => {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [selectedJob, setSelectedJob] = useState<CrawlJob | null>(null);
   
-  const [isLoadingJobs, setIsLoadingJobs] = useState<boolean>(true);
+  const [isLoadingJobs, setIsLoadingJobs] = useState<boolean>(false);
   const [isLoadingContacts, setIsLoadingContacts] = useState<boolean>(false);
   
   const [error, setError] = useState<string | null>(null);
@@ -122,8 +129,28 @@ const ContactsView: React.FC = () => {
   });
   const [isUpdatingStatus, setIsUpdatingStatus] = useState<string | null>(null);
   const [isEnriching, setIsEnriching] = useState<string | null>(null);
+  const [onlyWithWhatsApp, setOnlyWithWhatsApp] = useState(false);
   const [notesModalContact, setNotesModalContact] = useState<Contact | null>(null);
   const [viewingContact, setViewingContact] = useState<Contact | null>(null);
+  const [editingJobNameId, setEditingJobNameId] = useState<string | null>(null);
+  const [tempJobName, setTempJobName] = useState('');
+  
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [showAddContactModal, setShowAddContactModal] = useState(false);
+
+  const fetchContacts = React.useCallback(async () => {
+    if (!selectedJob) return;
+    try {
+        setIsLoadingContacts(true);
+        const fetchedContacts = await getContacts(selectedJob.id);
+        setContacts(fetchedContacts);
+        setError(null);
+    } catch (err) {
+        setError(`Falha ao buscar contatos para a pesquisa.`);
+    } finally {
+        setIsLoadingContacts(false);
+    }
+  }, [selectedJob]);
 
   const toggleSelectAll = () => {
     if (selectedContactIds.size === filteredContacts.length) {
@@ -257,6 +284,20 @@ const ContactsView: React.FC = () => {
     }
   };
 
+  const handleRenameJob = async (jobId: string, newName: string) => {
+    try {
+        await updateJobName(jobId, newName);
+        onJobsUpdate();
+        if (selectedJob?.id === jobId) {
+            setSelectedJob(prev => prev ? { ...prev, name: newName } : null);
+        }
+        setEditingJobNameId(null);
+    } catch (error) {
+        console.error("Failed to rename job:", error);
+        setError("Falha ao renomear pesquisa.");
+    }
+  };
+
   const handleAddToBlacklist = async (contact: Contact) => {
     setConfirmModal({
       isOpen: true,
@@ -291,7 +332,8 @@ const ContactsView: React.FC = () => {
       onConfirm: async () => {
         try {
           await deleteJob(jobId);
-          setJobs(prev => prev.filter(j => j.id !== jobId));
+          onJobsUpdate();
+          if (selectedJob?.id === jobId) setSelectedJob(null);
         } catch (err) {
           setError("Falha ao excluir pesquisa.");
         } finally {
@@ -357,20 +399,8 @@ const ContactsView: React.FC = () => {
   };
 
   useEffect(() => {
-    const fetchJobs = async () => {
-      try {
-        setIsLoadingJobs(true);
-        const fetchedJobs = await getJobs();
-        setJobs(fetchedJobs.filter(j => j.status === 'completed' || j.status === 'failed'));
-        setError(null);
-      } catch (err) {
-        setError('Falha ao buscar as pesquisas.');
-      } finally {
-        setIsLoadingJobs(false);
-      }
-    };
-    fetchJobs();
-  }, []);
+    onJobsUpdate();
+  }, [onJobsUpdate]);
   
   useEffect(() => {
     if (!selectedJob) {
@@ -378,21 +408,9 @@ const ContactsView: React.FC = () => {
         return;
     }
     
-    const fetchContacts = async () => {
-        try {
-            setIsLoadingContacts(true);
-            const fetchedContacts = await getContacts(selectedJob.id);
-            setContacts(fetchedContacts);
-            setError(null);
-        } catch (err) {
-            setError(`Falha ao buscar contatos para a pesquisa.`);
-        } finally {
-            setIsLoadingContacts(false);
-        }
-    };
     fetchContacts();
     resetFilters();
-  }, [selectedJob]);
+  }, [selectedJob, fetchContacts]);
 
   const availableSources = useMemo(() => {
     const sources = new Set(contacts.map(c => c.source_type));
@@ -408,7 +426,10 @@ const ContactsView: React.FC = () => {
     return contacts
       .filter(contact =>
         (contact.name && contact.name.toLowerCase().includes(term)) ||
-        contact.e164_number.includes(term) ||
+        (contact.e164_number && contact.e164_number.includes(term)) ||
+        (contact.email && contact.email.toLowerCase().includes(term)) ||
+        (contact.instagram_handle && contact.instagram_handle.toLowerCase().includes(term)) ||
+        (contact.linkedin_url && contact.linkedin_url.toLowerCase().includes(term)) ||
         (contact.city && contact.city.toLowerCase().includes(term))
       )
       .filter(contact =>
@@ -425,11 +446,15 @@ const ContactsView: React.FC = () => {
           return true;
       })
       .filter(contact => {
-          if (!ddd) return true;
+          if (!ddd || !contact.e164_number) return true;
           const contactDdd = contact.e164_number.substring(3, 5);
           return contactDdd === ddd;
+      })
+      .filter(contact => {
+          if (onlyWithWhatsApp) return !!contact.e164_number;
+          return true;
       });
-  }, [contacts, searchTerm, selectedSources, selectedStatuses, dateFilter, dddFilter]);
+  }, [contacts, searchTerm, selectedSources, selectedStatuses, dateFilter, dddFilter, onlyWithWhatsApp]);
   
   const resetFilters = () => {
     setSearchTerm('');
@@ -437,6 +462,7 @@ const ContactsView: React.FC = () => {
     setSelectedStatuses([]);
     setDateFilter({ start: '', end: '' });
     setDddFilter('');
+    setOnlyWithWhatsApp(false);
     setCurrentPage(1);
   };
   
@@ -480,14 +506,80 @@ const ContactsView: React.FC = () => {
   
   const renderContactList = () => (
     <>
+      {showImportModal && (
+          <ImportContactsModal 
+            isOpen={showImportModal} 
+            onClose={() => setShowImportModal(false)} 
+            currentJobs={jobs}
+            onImportSuccess={() => selectedJob && fetchContacts()}
+          />
+      )}
+      {showAddContactModal && (
+          <AddContactModal 
+            isOpen={showAddContactModal} 
+            onClose={() => setShowAddContactModal(false)} 
+            currentJobs={jobs}
+            onSuccess={() => selectedJob && fetchContacts()}
+          />
+      )}
+
       <div className="space-y-6">
         <div className="flex items-center gap-4">
           <button onClick={() => setSelectedJob(null)} className="p-2 bg-gray-700 hover:bg-gray-600 rounded-full transition-colors">
             <BackIcon />
           </button>
-          <div>
-            <h1 className="text-3xl font-bold text-white tracking-tight">Contatos para: <span className="text-sky-400">{selectedJob?.niche}</span></h1>
-            <p className="mt-1 text-md text-gray-400">Local: {selectedJob?.city || 'N/A'} / {selectedJob?.ddd || 'N/A'}</p>
+          <div className="flex-1">
+            {editingJobNameId === selectedJob?.id ? (
+                <div className="flex items-center gap-2">
+                    <input 
+                        autoFocus
+                        value={tempJobName}
+                        onChange={e => setTempJobName(e.target.value)}
+                        className="bg-gray-700 border border-sky-500 rounded px-3 py-1 text-xl font-bold text-white outline-none"
+                        onKeyDown={e => {
+                            if (e.key === 'Enter') handleRenameJob(selectedJob!.id, tempJobName);
+                            if (e.key === 'Escape') setEditingJobNameId(null);
+                        }}
+                    />
+                    <button onClick={() => handleRenameJob(selectedJob!.id, tempJobName)} className="text-emerald-400 p-2">
+                        <CheckIcon size={20} />
+                    </button>
+                    <button onClick={() => setEditingJobNameId(null)} className="text-gray-400 p-2">
+                        <XIcon size={20} />
+                    </button>
+                </div>
+            ) : (
+                <div className="flex items-center gap-2 group">
+                    <h1 className="text-3xl font-bold text-white tracking-tight">
+                        Contatos para: <span className="text-sky-400">{selectedJob?.name || selectedJob?.niche}</span>
+                    </h1>
+                    <button 
+                        onClick={() => {
+                            setEditingJobNameId(selectedJob!.id);
+                            setTempJobName(selectedJob?.name || selectedJob?.niche || '');
+                        }}
+                        className="p-1 text-gray-500 hover:text-sky-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                        <Edit2Icon size={18} />
+                    </button>
+                </div>
+            )}
+            <p className="mt-1 text-md text-gray-400">Local: {selectedJob?.city || 'N/A'} / {selectedJob?.ddd || 'N/A'} {selectedJob?.name && <span className="text-xs italic ml-2 opacity-50">({selectedJob.niche})</span>}</p>
+          </div>
+
+          <div className="flex items-center gap-3">
+              <button 
+                onClick={() => setShowAddContactModal(true)}
+                className="bg-gray-800 hover:bg-gray-700 text-gray-300 px-4 py-2 rounded-xl border border-gray-700 text-sm font-bold transition-all flex items-center gap-2"
+              >
+                  <PlusIcon size={16} /> Adicionar Manual
+              </button>
+              <button 
+                onClick={() => setShowImportModal(true)}
+                className="bg-sky-600 hover:bg-sky-500 text-white px-4 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-2 shadow-lg shadow-sky-900/20"
+              >
+                  <UploadIcon size={16} /> Importar Lista
+              </button>
           </div>
         </div>
 
@@ -560,6 +652,21 @@ const ContactsView: React.FC = () => {
                       ))}
                     </div>
                     
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-medium text-gray-300">Filtro Rápido:</span>
+                      <button
+                        onClick={() => setOnlyWithWhatsApp(!onlyWithWhatsApp)}
+                        className={`px-3 py-1 text-xs font-semibold rounded-full transition-colors flex items-center gap-1.5 ${
+                          onlyWithWhatsApp
+                            ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/40'
+                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                        }`}
+                      >
+                        <PhoneIcon className="w-3 h-3" />
+                        Apenas WhatsApp
+                      </button>
+                    </div>
+
                     {selectedContactIds.size > 0 && (
                         <div className="flex items-center gap-2 animate-in fade-in zoom-in duration-200">
                             <button 
@@ -590,14 +697,14 @@ const ContactsView: React.FC = () => {
                   </button>
                   <button 
                     onClick={() => {
-                        const numbers = filteredContacts.map(c => c.e164_number).join('\n');
-                        navigator.clipboard.writeText(numbers);
-                        alert("Números copiados para a área de transferência.");
+                        const info = filteredContacts.map(c => c.e164_number || c.instagram_handle || c.linkedin_url || c.email).filter(Boolean).join('\n');
+                        navigator.clipboard.writeText(info);
+                        alert("Dados de contato copiados para a área de transferência.");
                     }}
                     disabled={filteredContacts.length === 0}
                     className="flex items-center gap-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 text-white font-bold py-2 px-4 rounded-md transition duration-200 text-sm"
                   >
-                    Copiar Números
+                    Copiar Contatos
                   </button>
                   <button onClick={resetFilters} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-md transition duration-200 text-sm">
                     Limpar Filtros
@@ -633,7 +740,7 @@ const ContactsView: React.FC = () => {
                                 />
                             </th>
                             <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Nome / Empresa</th>
-                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">WhatsApp</th>
+                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Contato Principal</th>
                             <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Local</th>
                             <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Inteligência</th>
                             <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Status</th>
@@ -656,20 +763,51 @@ const ContactsView: React.FC = () => {
                                         className="h-4 w-4 rounded border-gray-500 bg-gray-600 text-sky-600 focus:ring-sky-500"
                                     />
                                 </td>
-                                <td className="px-6 py-4 whitespace-nowrap"><div className="text-sm font-medium text-white">{contact.name}</div><div className="text-xs text-gray-400">{contact.category}</div></td>
+                                <td className="px-6 py-4 whitespace-nowrap">
+                                    <div className="flex items-center gap-3">
+                                        <Avatar 
+                                            src={contact.photo_url} 
+                                            name={contact.name} 
+                                            size="md" 
+                                            accountType={contact.account_type as any}
+                                        />
+                                        <div>
+                                            <div className="text-sm font-medium text-white">{contact.name || 'Sem nome'}</div>
+                                            <div className="text-xs text-gray-400">{contact.category}</div>
+                                        </div>
+                                    </div>
+                                </td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-sky-400 font-mono">
-                                    <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                                        {contact.e164_number}
-                                        <button 
-                                            onClick={() => {
-                                                navigator.clipboard.writeText(contact.e164_number);
-                                                // Could add a temporary "Copied!" tooltip here
-                                            }}
-                                            className="p-1 hover:bg-gray-600 rounded text-gray-400 hover:text-white transition-colors"
-                                            title="Copiar número"
-                                        >
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
-                                        </button>
+                                    <div className="flex flex-col gap-1" onClick={(e) => e.stopPropagation()}>
+                                        {contact.e164_number ? (
+                                            <div className="flex items-center gap-2">
+                                                <span>{contact.e164_number}</span>
+                                                <button 
+                                                    onClick={() => navigator.clipboard.writeText(contact.e164_number!)}
+                                                    className="p-1 hover:bg-gray-600 rounded text-gray-400 hover:text-white transition-colors"
+                                                    title="Copiar número"
+                                                >
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                                                </button>
+                                            </div>
+                                        ) : contact.instagram_handle ? (
+                                            <div className="flex items-center gap-2 text-pink-400 font-sans">
+                                                <InstagramIcon />
+                                                <span>@{contact.instagram_handle}</span>
+                                            </div>
+                                        ) : contact.linkedin_url ? (
+                                            <div className="flex items-center gap-2 text-blue-400 font-sans">
+                                                <LinkedInIcon />
+                                                <span className="truncate max-w-[120px]">LinkedIn Perfil</span>
+                                            </div>
+                                        ) : contact.email ? (
+                                            <div className="flex items-center gap-2 text-gray-400 font-sans">
+                                                <MailIcon size={14} />
+                                                <span className="truncate max-w-[120px]">{contact.email}</span>
+                                            </div>
+                                        ) : (
+                                            <span className="text-gray-600 italic">Sem contato direto</span>
+                                        )}
                                     </div>
                                 </td>
                                 <td className="px-6 py-4 whitespace-nowrap">
@@ -819,9 +957,42 @@ const ContactsView: React.FC = () => {
   
   const renderJobList = () => (
     <div className="space-y-6">
-        <div>
-            <h1 className="text-4xl font-bold text-white tracking-tight">Pesquisas Realizadas</h1>
-            <p className="mt-2 text-lg text-gray-400">Selecione uma pesquisa para visualizar, filtrar e exportar os contatos coletados.</p>
+        {showImportModal && (
+            <ImportContactsModal 
+                isOpen={showImportModal} 
+                onClose={() => setShowImportModal(false)} 
+                currentJobs={jobs}
+                onImportSuccess={() => onJobsUpdate()}
+            />
+        )}
+        {showAddContactModal && (
+            <AddContactModal 
+                isOpen={showAddContactModal} 
+                onClose={() => setShowAddContactModal(false)} 
+                currentJobs={jobs}
+                onSuccess={() => onJobsUpdate()}
+            />
+        )}
+
+        <div className="flex justify-between items-end">
+            <div>
+                <h1 className="text-4xl font-bold text-white tracking-tight">Pesquisas Realizadas</h1>
+                <p className="mt-2 text-lg text-gray-400">Selecione uma pesquisa para visualizar, filtrar e exportar os contatos coletados.</p>
+            </div>
+            <div className="flex items-center gap-3">
+                <button 
+                    onClick={() => setShowAddContactModal(true)}
+                    className="bg-gray-800 hover:bg-gray-700 text-gray-300 px-4 py-2 rounded-xl border border-gray-700 text-sm font-bold transition-all flex items-center gap-2"
+                >
+                    <PlusIcon size={16} /> Adicionar Manual
+                </button>
+                <button 
+                    onClick={() => setShowImportModal(true)}
+                    className="bg-sky-600 hover:bg-sky-500 text-white px-4 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-2 shadow-lg shadow-sky-900/20"
+                >
+                    <UploadIcon size={16} /> Importar Lista
+                </button>
+            </div>
         </div>
         <div className="bg-gray-800 rounded-lg shadow-xl overflow-hidden">
             {isLoadingJobs ? (
@@ -834,7 +1005,7 @@ const ContactsView: React.FC = () => {
                 <div className="overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-700">
                         <thead className="bg-gray-800"><tr>
-                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Nicho</th>
+                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Nome / Nicho</th>
                             <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Local</th>
                             <th scope="col" className="px-6 py-3 text-center text-xs font-medium text-gray-300 uppercase tracking-wider">Contatos Encontrados</th>
                             <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Data</th>
@@ -842,8 +1013,43 @@ const ContactsView: React.FC = () => {
                         </tr></thead>
                         <tbody className="bg-gray-800 divide-y divide-gray-700">
                             {jobs.map(job => (
-                                <tr key={job.id} onClick={() => setSelectedJob(job)} className="hover:bg-gray-700 transition-colors cursor-pointer">
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{job.niche}</td>
+                                <tr key={job.id} onClick={() => setSelectedJob(job)} className="hover:bg-gray-700 transition-colors cursor-pointer group/tr">
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">
+                                        {editingJobNameId === job.id ? (
+                                            <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                                                <input 
+                                                    autoFocus
+                                                    value={tempJobName}
+                                                    onChange={e => setTempJobName(e.target.value)}
+                                                    className="bg-gray-900 border border-sky-500 rounded px-2 py-1 text-xs text-white outline-none"
+                                                    onKeyDown={e => {
+                                                        if (e.key === 'Enter') handleRenameJob(job.id, tempJobName);
+                                                        if (e.key === 'Escape') setEditingJobNameId(null);
+                                                    }}
+                                                />
+                                                <button onClick={() => handleRenameJob(job.id, tempJobName)} className="text-emerald-400">
+                                                    <CheckIcon size={14} />
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <div className="flex items-center gap-2">
+                                                <div className="flex flex-col">
+                                                    <span className="font-bold">{job.name || job.niche}</span>
+                                                    {job.name && <span className="text-[10px] text-gray-500 font-normal italic">{job.niche}</span>}
+                                                </div>
+                                                <button 
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setEditingJobNameId(job.id);
+                                                        setTempJobName(job.name || job.niche);
+                                                    }}
+                                                    className="p-1 text-gray-500 hover:text-sky-400 opacity-0 group-hover/tr:opacity-100 transition-opacity"
+                                                >
+                                                    <Edit2Icon size={14} />
+                                                </button>
+                                            </div>
+                                        )}
+                                    </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{job.city || '--'} / {job.ddd || '--'}</td>
                                     <td className={`px-6 py-4 whitespace-nowrap text-sm text-center font-bold ${job.contacts_found > 0 ? 'text-sky-400' : 'text-gray-500'}`}>{job.contacts_found}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-400">{new Date(job.created_at).toLocaleString()}</td>

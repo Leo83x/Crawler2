@@ -107,7 +107,7 @@ export const getLogs = async (): Promise<ErrorLog[]> => {
     return CrawlerLogger.getLogs();
 };
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+export const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 const generateId = () => `job_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -163,13 +163,20 @@ const parseGeminiJsonResponse = (responseText: string | undefined | null): Gemin
              
              if (Array.isArray(list)) {
                 contacts = list.map((item: any) => {
-                    const phoneVal = item.whatsapp || item.phone || '';
+                    const phoneVal = item.whatsapp || item.phone || item.e164_number || '';
                     return {
                         name: String(item.name || 'Não informado'),
-                        e164_number: String(phoneVal),
-                        raw_number: String(phoneVal),
+                        e164_number: phoneVal ? String(phoneVal) : undefined,
+                        raw_number: phoneVal ? String(phoneVal) : undefined,
+                        email: item.email ? String(item.email) : undefined,
+                        instagram_handle: item.instagram_handle || item.instagram || item.handle ? String(item.instagram_handle || item.instagram || item.handle) : undefined,
+                        linkedin_url: item.linkedin_url || item.linkedin ? String(item.linkedin_url || item.linkedin) : undefined,
+                        facebook_url: item.facebook_url || item.facebook ? String(item.facebook_url || item.facebook) : undefined,
+                        website: item.website || item.site ? String(item.website || item.site) : undefined,
+                        description: item.description || item.bio ? String(item.description || item.bio) : undefined,
+                        photo_url: (item.photo_url || item.photo || item.image || item.avatar) ? String(item.photo_url || item.photo || item.image || item.avatar) : undefined,
                         address: item.address ? String(item.address) : null,
-                        source_url: String(item.source || 'N/A'),
+                        source_url: String(item.source || item.source_url || 'N/A'),
                     };
                 });
              }
@@ -214,40 +221,62 @@ const isValidBrazilianMobileNumber = (phone: string | null | undefined): boolean
 // --- Specialized Agents ---
 
 const getGoogleSearchAgent = async (params: CrawlJobParams): Promise<GeminiContact[]> => {
-    // More flexible query
-    const searchQuery = `${params.niche} ${params.city || 'Brasil'} (whatsapp OR "celular" OR "contato")`;
+    // More flexible query to include social media profiles and DDD if provided
+    const dddQuery = params.ddd ? `(${params.ddd}) OR "DDD ${params.ddd}"` : '';
+    const searchQuery = `${params.niche} ${params.city || 'Brasil'} ${dddQuery} (whatsapp OR "celular" OR "contato" OR site:instagram.com OR site:linkedin.com)`;
     
-    const contactSearchPrompt = `Realize uma pesquisa exaustiva no Google para encontrar o máximo de empresas de: "${params.niche}" em "${params.city || 'Brasil'}".
+    const contactSearchPrompt = `Realize uma pesquisa exaustiva no Google para encontrar o máximo de profissionais, clínicas ou empresas de: "${params.niche}" em "${params.city || 'Brasil'}".
     
-    QUERY: ${searchQuery}
+    QUERY DE APOIO: ${searchQuery}
     
-    TAREFA:
-    1. Analise os resultados da busca (títulos e descrições).
-    2. Identifique nomes de empresas e NÚMEROS DE WHATSAPP/CELULAR brasileiros.
-    3. Tente extrair pelo menos 20 a 30 contatos únicos.
-    4. Se houver muitos resultados, liste os mais relevantes e ativos.
+    INSTRUÇÕES CRÍTICAS:
+    1. Utilize a ferramenta de busca para encontrar perfis em redes sociais, sites oficiais e diretórios.
+    2. FOCO: Extraia nomes, NÚMEROS DE WHATSAPP/CELULAR, perfis de Instagram, LinkedIn e E-mails.
+    3. Mesmo que não encontre o número de telefone, capture o perfil do Instagram ou LinkedIn se for relevante.
+    4. Tente encontrar pelo menos 30 a 50 resultados diferentes.
+    5. No campo "source", coloque a URL de onde a informação foi extraída.
     
     SAÍDA OBRIGATÓRIA:
-    Gere um bloco JSON com a seguinte estrutura:
-    \`\`\`json
-    {
-      "contacts": [
-        { "name": "Nome da Empresa", "whatsapp": "+55...", "source": "URL ou Contexto" }
-      ]
-    }
-    \`\`\`
-    `;
+    Gere um bloco JSON com a chave "contacts".`;
 
     try {
-        const response = await ai.models.generateContent({
+        const result = await ai.models.generateContent({
             model: "gemini-3-flash-preview",
             contents: contactSearchPrompt,
             config: {
                 tools: [{ googleSearch: {} }],
-                // Removed responseMimeType to allow the model to use the tool more freely before formatting
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        contacts: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    name: { type: Type.STRING },
+                                    whatsapp: { type: Type.STRING },
+                                    instagram_handle: { type: Type.STRING },
+                                    linkedin_url: { type: Type.STRING },
+                                    email: { type: Type.STRING },
+                                    website: { type: Type.STRING },
+                                    description: { type: Type.STRING },
+                                    source: { type: Type.STRING }
+                                }
+                            }
+                        }
+                    },
+                    required: ["contacts"]
+                },
+                safetySettings: [
+                    { category: 'HARM_CATEGORY_HATE_SPEECH' as any, threshold: 'BLOCK_NONE' as any },
+                    { category: 'HARM_CATEGORY_HARASSMENT' as any, threshold: 'BLOCK_NONE' as any },
+                    { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT' as any, threshold: 'BLOCK_NONE' as any },
+                    { category: 'HARM_CATEGORY_DANGEROUS_CONTENT' as any, threshold: 'BLOCK_NONE' as any }
+                ]
             }
         });
-        return parseGeminiJsonResponse(response.text);
+        return parseGeminiJsonResponse(result.text);
     } catch (error) {
         CrawlerLogger.logError("GoogleSearchAgent", error, { params, searchQuery });
         return [];
@@ -256,38 +285,74 @@ const getGoogleSearchAgent = async (params: CrawlJobParams): Promise<GeminiConta
 
 const getInstagramSearchAgent = async (params: CrawlJobParams): Promise<GeminiContact[]> => {
     // Simplified Dorking for snippet visibility
-    const searchQuery = `site:instagram.com "${params.niche}" "${params.city || ''}" whatsapp -inurl:directory`;
+    const dddQuery = params.ddd ? `(${params.ddd}) OR "DDD ${params.ddd}"` : '';
+    const searchQuery = `site:instagram.com "${params.niche}" "${params.city || ''}" ${dddQuery} (whatsapp OR "@") -inurl:directory`;
 
     const contactSearchPrompt = `Realize uma pesquisa exaustiva no Google por perfis do Instagram de "${params.niche}" no "${params.city || 'Brasil'}".
     
-    QUERY: ${searchQuery}
+    QUERY SUGERIDA: ${searchQuery}
 
     TAREFA:
-    1. Analise todos os snippets dos resultados de busca.
-    2. Extraia nomes e números de WhatsApp que aparecem na descrição/bio.
-    3. Tente encontrar pelo menos 20 contatos diferentes.
-    4. Ignore perfis sem número de telefone visível.
+    1. Analise todos os snippets dos resultados de busca do Instagram e use a busca se necessário para encontrar mais detalhes.
+    2. Extraia nomes (@usuario), Bio, e números de WhatsApp que aparecem na descrição.
+    3. IMPORTANTE: Extraia o instagram_handle (@usuario) MESMO QUE não tenha WhatsApp.
+    4. Tente capturar o link da imagem de perfil (photo_url).
+    5. Tente encontrar pelo menos 20 contatos diferentes.
     
     SAÍDA OBRIGATÓRIA:
     Gere um bloco JSON:
     \`\`\`json
     {
       "contacts": [
-        { "name": "@usuario ou Nome", "whatsapp": "+55...", "source": "Link do Instagram" }
+        { 
+          "name": "Nome exibido", 
+          "instagram_handle": "@usuario",
+          "whatsapp": "+55...", 
+          "photo_url": "URL da foto", 
+          "description": "bio",
+          "source": "Link do Instagram" 
+        }
       ]
     }
     \`\`\`
     `;
 
     try {
-        const response = await ai.models.generateContent({
+        const result = await ai.models.generateContent({
             model: "gemini-3-flash-preview",
             contents: contactSearchPrompt,
             config: {
                 tools: [{ googleSearch: {} }],
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        contacts: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    name: { type: Type.STRING },
+                                    instagram_handle: { type: Type.STRING },
+                                    whatsapp: { type: Type.STRING },
+                                    photo_url: { type: Type.STRING },
+                                    description: { type: Type.STRING },
+                                    source: { type: Type.STRING }
+                                }
+                            }
+                        }
+                    },
+                    required: ["contacts"]
+                },
+                safetySettings: [
+                    { category: 'HARM_CATEGORY_HATE_SPEECH' as any, threshold: 'BLOCK_NONE' as any },
+                    { category: 'HARM_CATEGORY_HARASSMENT' as any, threshold: 'BLOCK_NONE' as any },
+                    { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT' as any, threshold: 'BLOCK_NONE' as any },
+                    { category: 'HARM_CATEGORY_DANGEROUS_CONTENT' as any, threshold: 'BLOCK_NONE' as any }
+                ]
             }
         });
-        return parseGeminiJsonResponse(response.text);
+        return parseGeminiJsonResponse(result.text);
     } catch (error) {
         CrawlerLogger.logError("InstagramAgent", error, { params, searchQuery });
         return [];
@@ -297,7 +362,8 @@ const getInstagramSearchAgent = async (params: CrawlJobParams): Promise<GeminiCo
 const getGoogleMapsAgent = async (params: CrawlJobParams): Promise<GeminiContact[]> => {
     if (!params.city) return [];
     
-    const contactSearchPrompt = `Busque no Google Maps por profissionais ou empresas de "${params.niche}" em "${params.city}".
+    const dddInfo = params.ddd ? `focando em números com DDD ${params.ddd}` : '';
+    const contactSearchPrompt = `Busque no Google Maps por profissionais ou empresas de "${params.niche}" em "${params.city}" ${dddInfo}.
     
     TAREFA:
     1. Identifique pelo menos 20 a 25 estabelecimentos relevantes.
@@ -305,33 +371,226 @@ const getGoogleMapsAgent = async (params: CrawlJobParams): Promise<GeminiContact
     3. Se encontrar sites, tente identificar o whatsapp neles também.
     
     SAÍDA OBRIGATÓRIA:
-    Gere um bloco JSON com a seguinte estrutura:
-    \`\`\`json
+    Retorne APENAS um bloco JSON com a seguinte estrutura:
     {
       "contacts": [
         { "name": "Nome", "whatsapp": "+55...", "address": "Endereço", "source": "Google Maps" }
       ]
-    }
-    \`\`\`
-    `;
+    }`;
 
     try {
-        const response = await ai.models.generateContent({
+        const result = await ai.models.generateContent({
             model: "gemini-3-flash-preview",
             contents: contactSearchPrompt,
             config: {
                 tools: [{ googleMaps: {} }],
+                // Google Maps tool DOES NOT support responseMimeType: "application/json"
+                safetySettings: [
+                    { category: 'HARM_CATEGORY_HATE_SPEECH' as any, threshold: 'BLOCK_NONE' as any },
+                    { category: 'HARM_CATEGORY_HARASSMENT' as any, threshold: 'BLOCK_NONE' as any },
+                    { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT' as any, threshold: 'BLOCK_NONE' as any },
+                    { category: 'HARM_CATEGORY_DANGEROUS_CONTENT' as any, threshold: 'BLOCK_NONE' as any }
+                ]
             }
         });
-        return parseGeminiJsonResponse(response.text);
+        
+        const text = result.text || '';
+        if (!text) return [];
+
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+            const data = JSON.parse(jsonMatch[0]);
+            return (data.contacts || []).map((c: any) => ({
+                name: c.name || '',
+                whatsapp: c.whatsapp || '',
+                address: c.address || '',
+                source: c.source || 'Google Maps'
+            }));
+        }
+        return [];
     } catch (error) {
         CrawlerLogger.logError("GoogleMapsAgent", error, { params });
         return [];
     }
 }
 
+const proxyFetch = async (url: string, options: any = {}) => {
+    const response = await fetch('/api/proxy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, ...options })
+    });
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || `Proxy error: ${response.status}`);
+    }
+    // Check if it's JSON or Text
+    const contentType = response.headers.get("content-type");
+    if (contentType && contentType.includes("application/json")) {
+        return await response.json();
+    }
+    return await response.text();
+};
+
+const getDoctoraliaDirectAgent = async (params: CrawlJobParams): Promise<GeminiContact[]> => {
+    const token = process.env.SCRAPE_DO_TOKEN || "49d2cd42c1374d9a9bd0e741bd2fb43f348015dd31a";
+    let allContacts: GeminiContact[] = [];
+    
+    // 1. Determine the target URL
+    let baseUrl: string;
+    if (params.direct_url && params.direct_url.includes('doctoralia.com.br')) {
+        baseUrl = params.direct_url;
+    } else {
+        const niche = encodeURIComponent(params.niche);
+        const city = params.city ? encodeURIComponent(params.city.split('/')[0].trim()) : '';
+        baseUrl = `https://www.doctoralia.com.br/pesquisa?q=${niche}&loc=${city}`;
+    }
+
+    const maxPages = params.max_pages_per_source || 1;
+
+    for (let page = 0; page < maxPages; page++) {
+        let currentUrl = baseUrl;
+        if (page > 0) {
+            if (currentUrl.includes('page=')) {
+                currentUrl = currentUrl.replace(/page=\d+/, `page=${page + 1}`);
+            } else {
+                currentUrl += (currentUrl.includes('?') ? '&' : '?') + `page=${page + 1}`;
+            }
+        }
+
+        try {
+            console.log(`[DoctoraliaDirect] Scraping list page ${page + 1}: ${currentUrl}`);
+            const scrapeDoUrl = `https://api.scrape.do?token=${token}&url=${encodeURIComponent(currentUrl)}&geoCode=br&render=true`;
+            
+            const html = await proxyFetch(scrapeDoUrl);
+            
+            if (!html || (typeof html === 'string' && html.length < 1000)) {
+                console.warn("[DoctoraliaDirect] Empty or too short HTML from list page.");
+                continue;
+            }
+
+            // Extract profile links using regex first as it's more reliable for simple patterns
+            const htmlString = typeof html === 'string' ? html : JSON.stringify(html);
+            
+            // Regex to find doctoralia profile links (usually /name-surname or /name-surname/specialty/city)
+            // Example profile link: <a href="/jose-silva" ... or <a href="https://www.doctoralia.com.br/jose-silva"
+            const urlRegex = /href="(\/([^"\/]+)|https:\/\/www\.doctoralia\.com\.br\/([^"\/]+))"/g;
+            let foundUrls = new Set<string>();
+            let match;
+            while ((match = urlRegex.exec(htmlString)) !== null) {
+                const url = match[1];
+                // Filter out common non-profile paths
+                const isBlacklisted = /^\/(pesquisa|search|api|static|blog|ajuda|login|signup|termos|privacidade|faq|contato|sobre|imprensa|carreiras|anuncie|for-doctors|for-clinics|business|perfil-do-profissional|especialistas-pro|especialidades|doencas|exames|centros|opinioes|perguntas|servicos|telemedicina|perguntas-frequentes|convenios|planos-de-saude|unidades-de-saude|mapa-do-site|especialistas-mais-buscados)/.test(url);
+                
+                if (!isBlacklisted && url.length > 5) {
+                    foundUrls.add(url);
+                }
+            }
+
+            console.log(`[DoctoraliaDirect] Regex found ${foundUrls.size} potential links on page ${page + 1}`);
+
+            // If regex found too few, fallback to Gemini
+            let profileUrls: string[] = Array.from(foundUrls);
+            if (profileUrls.length < 5) {
+                const extractionPrompt = `Analise o HTML da Doctoralia e extraia todos os links (URLs) de perfis de médicos e profissionais de saúde.
+                Links geralmente seguem o padrão "/nome-do-profissional" ou "https://www.doctoralia.com.br/nome...". 
+                Ignore links de busca, filtros, rodapé ou anúncios.
+                
+                HTML:
+                ${htmlString.substring(0, 50000)}
+                
+                Retorne APENAS um array JSON de strings: ["url1", "url2", ...]`;
+
+                const result = await ai.models.generateContent({
+                    model: "gemini-3-flash-preview",
+                    contents: extractionPrompt,
+                });
+
+                const text = result.text || '';
+                const urlsMatch = text.match(/\[[\s\S]*\]/);
+                if (urlsMatch) {
+                    try {
+                        const geminiUrls: string[] = JSON.parse(urlsMatch[0]);
+                        profileUrls = Array.from(new Set([...profileUrls, ...geminiUrls]));
+                    } catch (e) {
+                        console.error("[DoctoraliaDirect] Gemini URL parse error", e);
+                    }
+                }
+            }
+            
+            // Normalize and filter URLs again
+            profileUrls = profileUrls
+                .map(u => u.startsWith('http') ? u : `https://www.doctoralia.com.br${u.startsWith('/') ? '' : '/'}${u}`)
+                .filter(u => !u.includes('?') && !u.includes('#') && u.split('/').length >= 4); // Usually needs at least one path segment after domain
+
+            console.log(`[DoctoraliaDirect] Final profile count for page ${page + 1}: ${profileUrls.length}`);
+
+            // 2. Fetch each profile to find the phone number
+            for (const profileUrl of profileUrls.slice(0, 10)) {
+                try {
+                    console.log(`[DoctoraliaDirect] Deep scraping profile: ${profileUrl}`);
+                    const profileScrapeUrl = `https://api.scrape.do?token=${token}&url=${encodeURIComponent(profileUrl)}&geoCode=br&render=true`;
+                    
+                    const profileHtml = await proxyFetch(profileScrapeUrl);
+                    const profileHtmlString = typeof profileHtml === 'string' ? profileHtml : JSON.stringify(profileHtml);
+
+                    const profileExtractionPrompt = `Você é um especialista em extração de contatos. Capture os detalhes do profissional neste HTML da Doctoralia.
+                    
+                    INSTRUÇÕES:
+                    1. Encontre o NOME do profissional.
+                    2. Encontre o TELEFONE ou WHATSAPP. Procure dentro de blocos <script> que contenham "initialState" ou dados JSON (onde o telefone costuma estar escondido em propriedades como "phone", "telephone", "mobile", "whatsapp", "plainPhoneNumber").
+                    3. Também procure por números no texto visível.
+                    
+                    URL: ${profileUrl}
+                    HTML:
+                    ${profileHtmlString.substring(0, 60000)}
+                    
+                    Retorne JSON: { "name": "...", "whatsapp": "...", "source": "${profileUrl}", "description": "..." }`;
+
+                    const profileResult = await ai.models.generateContent({
+                        model: "gemini-3-flash-preview",
+                        contents: profileExtractionPrompt,
+                    });
+
+                    const profileText = profileResult.text || '';
+                    const profileJsonMatch = profileText.match(/\{[\s\S]*\}/);
+                    if (profileJsonMatch) {
+                        try {
+                            const contact = JSON.parse(profileJsonMatch[0]);
+                            if (contact.name && (contact.whatsapp || contact.phone)) {
+                                allContacts.push({
+                                    ...contact,
+                                    whatsapp: contact.whatsapp || contact.phone
+                                });
+                                // Periodically update job contacts_found if possible
+                                // For now we return at the end
+                            }
+                        } catch (e) {
+                            console.error("[DoctoraliaDirect] Error parsing profile JSON", e);
+                        }
+                    }
+                    
+                    await new Promise(r => setTimeout(r, 1500)); // Slightly faster
+                } catch (err) {
+                    console.error(`[DoctoraliaDirect] Failed profile ${profileUrl}:`, err);
+                }
+            }
+
+            if (profileUrls.length < 3) break; 
+            if (page < maxPages - 1) await new Promise(r => setTimeout(r, 5000));
+
+        } catch (error) {
+            CrawlerLogger.logError("DoctoraliaDirectAgent", error, { params, page });
+            break;
+        }
+    }
+
+    return allContacts;
+};
+
 const getDoctoraliaAgent = async (params: CrawlJobParams): Promise<GeminiContact[]> => {
-    const searchQuery = `site:doctoralia.com.br ${params.niche} ${params.city || ''} whatsapp`;
+    const dddQuery = params.ddd ? `(${params.ddd}) OR "DDD ${params.ddd}"` : '';
+    const searchQuery = `site:doctoralia.com.br ${params.niche} ${params.city || ''} ${dddQuery} whatsapp`;
     const contactSearchPrompt = `Realize uma pesquisa exaustiva no Doctoralia para encontrar profissionais de "${params.niche}" em "${params.city || 'Brasil'}".
     
     TAREFA:
@@ -344,14 +603,38 @@ const getDoctoraliaAgent = async (params: CrawlJobParams): Promise<GeminiContact
     `;
 
     try {
-        const response = await ai.models.generateContent({
+        const result = await ai.models.generateContent({
             model: "gemini-3-flash-preview",
             contents: contactSearchPrompt,
             config: {
                 tools: [{ googleSearch: {} }],
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        contacts: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    name: { type: Type.STRING },
+                                    whatsapp: { type: Type.STRING },
+                                    source: { type: Type.STRING }
+                                }
+                            }
+                        }
+                    },
+                    required: ["contacts"]
+                },
+                safetySettings: [
+                    { category: 'HARM_CATEGORY_HATE_SPEECH' as any, threshold: 'BLOCK_NONE' as any },
+                    { category: 'HARM_CATEGORY_HARASSMENT' as any, threshold: 'BLOCK_NONE' as any },
+                    { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT' as any, threshold: 'BLOCK_NONE' as any },
+                    { category: 'HARM_CATEGORY_DANGEROUS_CONTENT' as any, threshold: 'BLOCK_NONE' as any }
+                ]
             }
         });
-        return parseGeminiJsonResponse(response.text);
+        return parseGeminiJsonResponse(result.text);
     } catch (error) {
         CrawlerLogger.logError("DoctoraliaAgent", error, { params, searchQuery });
         return [];
@@ -359,27 +642,56 @@ const getDoctoraliaAgent = async (params: CrawlJobParams): Promise<GeminiContact
 };
 
 const getLinkedInSearchAgent = async (params: CrawlJobParams): Promise<GeminiContact[]> => {
-    const searchQuery = `site:linkedin.com/in/ OR site:linkedin.com/company/ "${params.niche}" "${params.city || ''}" whatsapp`;
-    const contactSearchPrompt = `Realize uma pesquisa exaustiva no LinkedIn para encontrar empresas ou profissionais de "${params.niche}" em "${params.city || 'Brasil'}".
+    const cityClean = params.city ? params.city.split('/')[0].trim() : '';
+    const dddQuery = params.ddd ? `(${params.ddd}) OR "DDD ${params.ddd}"` : '';
+    const searchQuery = `site:linkedin.com/in/ OR site:linkedin.com/company/ "${params.niche}" "${cityClean}" ${dddQuery} (whatsapp OR "contato" OR "email")`;
+    const contactSearchPrompt = `Realize uma pesquisa exaustiva no LinkedIn para encontrar empresas ou profissionais de "${params.niche}" em "${cityClean || 'Brasil'}".
     
     TAREFA:
     1. Identifique perfis ou páginas de empresas.
-    2. Extraia números de contato visíveis nos snippets.
-    3. Tente extrair pelo menos 20 contatos.
+    2. Extraia nomes, números de contato, LinkedIn URLs, e E-mails.
+    3. IMPORTANTE: Capture o LinkedIn URL mesmo que não tenha WhatsApp.
+    4. Tente extrair pelo menos 20 contatos.
     
     SAÍDA:
-    Bloco JSON com a chave "contacts".
+    Bloco JSON com a chave "contacts". Cada contato deve ter name, linkedin_url, whatsapp (se houver), email (se houver) e description.
     `;
 
     try {
-        const response = await ai.models.generateContent({
+        const result = await ai.models.generateContent({
             model: "gemini-3-flash-preview",
             contents: contactSearchPrompt,
             config: {
                 tools: [{ googleSearch: {} }],
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        contacts: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    name: { type: Type.STRING },
+                                    linkedin_url: { type: Type.STRING },
+                                    whatsapp: { type: Type.STRING },
+                                    email: { type: Type.STRING },
+                                    description: { type: Type.STRING }
+                                }
+                            }
+                        }
+                    },
+                    required: ["contacts"]
+                },
+                safetySettings: [
+                    { category: 'HARM_CATEGORY_HATE_SPEECH' as any, threshold: 'BLOCK_NONE' as any },
+                    { category: 'HARM_CATEGORY_HARASSMENT' as any, threshold: 'BLOCK_NONE' as any },
+                    { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT' as any, threshold: 'BLOCK_NONE' as any },
+                    { category: 'HARM_CATEGORY_DANGEROUS_CONTENT' as any, threshold: 'BLOCK_NONE' as any }
+                ]
             }
         });
-        return parseGeminiJsonResponse(response.text);
+        return parseGeminiJsonResponse(result.text);
     } catch (error) {
         CrawlerLogger.logError("LinkedInAgent", error, { params, searchQuery });
         return [];
@@ -387,12 +699,14 @@ const getLinkedInSearchAgent = async (params: CrawlJobParams): Promise<GeminiCon
 };
 
 const getFacebookSearchAgent = async (params: CrawlJobParams): Promise<GeminiContact[]> => {
-    const searchQuery = `site:facebook.com "${params.niche}" "${params.city || ''}" "whatsapp"`;
-    const contactSearchPrompt = `Realize uma pesquisa exaustiva no Facebook para encontrar empresas de "${params.niche}" em "${params.city || 'Brasil'}".
+    const cityClean = params.city ? params.city.split('/')[0].trim() : '';
+    const dddQuery = params.ddd ? `(${params.ddd}) OR "DDD ${params.ddd}"` : '';
+    const searchQuery = `site:facebook.com "${params.niche}" "${cityClean}" ${dddQuery} ("whatsapp" OR "contato" OR "email")`;
+    const contactSearchPrompt = `Realize uma pesquisa exaustiva no Facebook para encontrar empresas de "${params.niche}" em "${cityClean || 'Brasil'}".
     
     TAREFA:
     1. Identifique páginas de negócios ou perfis profissionais.
-    2. Extraia números de contato visíveis nos snippets da busca.
+    2. Extraia Nomes, WhatsApp, Facebook URL e E-mails.
     3. Tente extrair pelo menos 20 contatos.
     
     SAÍDA:
@@ -400,14 +714,40 @@ const getFacebookSearchAgent = async (params: CrawlJobParams): Promise<GeminiCon
     `;
 
     try {
-        const response = await ai.models.generateContent({
+        const result = await ai.models.generateContent({
             model: "gemini-3-flash-preview",
             contents: contactSearchPrompt,
             config: {
                 tools: [{ googleSearch: {} }],
+                // ... (safety settings)
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        contacts: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    name: { type: Type.STRING },
+                                    whatsapp: { type: Type.STRING },
+                                    facebook_url: { type: Type.STRING },
+                                    email: { type: Type.STRING }
+                                }
+                            }
+                        }
+                    },
+                    required: ["contacts"]
+                },
+                safetySettings: [
+                    { category: 'HARM_CATEGORY_HATE_SPEECH' as any, threshold: 'BLOCK_NONE' as any },
+                    { category: 'HARM_CATEGORY_HARASSMENT' as any, threshold: 'BLOCK_NONE' as any },
+                    { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT' as any, threshold: 'BLOCK_NONE' as any },
+                    { category: 'HARM_CATEGORY_DANGEROUS_CONTENT' as any, threshold: 'BLOCK_NONE' as any }
+                ]
             }
         });
-        return parseGeminiJsonResponse(response.text);
+        return parseGeminiJsonResponse(result.text);
     } catch (error) {
         CrawlerLogger.logError("FacebookAgent", error, { params, searchQuery });
         return [];
@@ -451,12 +791,12 @@ const getApifyAgent = async (params: CrawlJobParams): Promise<GeminiContact[]> =
 
         // Use Gemini to extract contacts from the scraped data
         const textToAnalyze = JSON.stringify(items);
-        const extractionPrompt = `Extraia nomes de empresas e números de WhatsApp brasileiros do seguinte JSON de resultados de busca:
+        const extractionPrompt = `Extraia nomes de empresas, números de WhatsApp brasileiros, perfis de redes sociais (Instagram handles, LinkedIn URLs, etc) e e-mails do seguinte JSON de resultados de busca:
         
         ${textToAnalyze}
         
         SAÍDA OBRIGATÓRIA:
-        Gere um bloco JSON com a chave "contacts".`;
+        Gere um bloco JSON com a chave "contacts". Cada objeto deve tentar preencher os campos: name, whatsapp, instagram_handle, linkedin_url, email, website e source.`;
 
         const geminiResponse = await ai.models.generateContent({
             model: "gemini-3-flash-preview",
@@ -499,12 +839,12 @@ const getFirecrawlAgent = async (params: CrawlJobParams): Promise<GeminiContact[
         
         // Firecrawl returns markdown/text. Use Gemini to extract.
         const textToAnalyze = JSON.stringify(data);
-        const extractionPrompt = `Extraia nomes de empresas e números de WhatsApp brasileiros destes dados de busca:
+        const extractionPrompt = `Extraia nomes de empresas, números de WhatsApp brasileiros, perfis de redes sociais e e-mails destes dados de busca:
         
         ${textToAnalyze}
         
         SAÍDA OBRIGATÓRIA:
-        Gere um bloco JSON com a chave "contacts".`;
+        Gere um bloco JSON com a chave "contacts". Tente extrair o máximo de detalhes possível, incluindo Bio/Descrição.`;
 
         const geminiResponse = await ai.models.generateContent({
             model: "gemini-3-flash-preview",
@@ -532,44 +872,34 @@ const getScrapeDoAgent = async (params: CrawlJobParams): Promise<GeminiContact[]
         const targetUrl = `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}&start=${start}`;
         
         try {
-            const scrapeDoUrl = `https://api.scrape.do?token=${token}&url=${encodeURIComponent(targetUrl)}&geoCode=br`;
-            const proxiedUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(scrapeDoUrl)}`;
+            const scrapeDoUrl = `https://api.scrape.do?token=${token}&url=${encodeURIComponent(targetUrl)}&geoCode=br&render=true`;
             
-            const response = await fetch(proxiedUrl);
+            const html = await proxyFetch(scrapeDoUrl);
             
-            if (!response.ok) {
-                if (response.status === 401 || response.status === 403) {
-                    throw new Error(`Token do Scrape.do inválido ou expirado. Verifique seu SCRAPE_DO_TOKEN.`);
-                }
-                throw new Error(`Scrape.do error: ${response.statusText}`);
-            }
-            
-            const html = await response.text();
-            
-            if (html.includes("detected unusual traffic") || html.includes("captcha")) {
+            if (typeof html === 'string' && (html.includes("detected unusual traffic") || html.includes("captcha"))) {
                 console.warn(`[Scrape.do] Bloqueio detectado na página ${page + 1}.`);
                 break;
             }
 
             const textToAnalyze = html.substring(0, 40000); 
             
-            const extractionPrompt = `Extraia nomes de empresas e números de WhatsApp brasileiros do seguinte HTML de resultados de busca (Página ${page + 1}):
+            const extractionPrompt = `Extraia nomes de empresas, números de WhatsApp brasileiros, perfis de redes sociais e e-mails do seguinte HTML de resultados de busca (Página ${page + 1}):
             
             ${textToAnalyze}
             
             SAÍDA OBRIGATÓRIA:
-            Gere um bloco JSON com a chave "contacts".`;
+            Gere um bloco JSON com a chave "contacts". Cada objeto deve conter: name, whatsapp (se houver), instagram_handle (se houver), linkedin_url (se houver), facebook_url (se houver), email (se houver) e description.`;
 
-            const geminiResponse = await ai.models.generateContent({
+            const result = await ai.models.generateContent({
                 model: "gemini-3-flash-preview",
                 contents: extractionPrompt,
             });
 
-            const contacts = parseGeminiJsonResponse(geminiResponse.text);
+            const contacts = parseGeminiJsonResponse(result.text);
             allContacts = [...allContacts, ...contacts];
 
             if (contacts.length < 3) break; // Most likely end of results
-            if (page < maxPages - 1) await new Promise(r => setTimeout(r, 1000));
+            if (page < maxPages - 1) await new Promise(r => setTimeout(r, 5000));
 
         } catch (error) {
             CrawlerLogger.logError("ScrapeDoAgent", error, { params, page });
@@ -606,16 +936,18 @@ export const startCrawl = async (params: CrawlJobParams): Promise<CrawlJob> => {
     const jobId = generateId();
     const newJob: any = {
       id: jobId,
+      name: params.name || `${params.niche}${params.city ? ` - ${params.city}` : ''}`,
       niche: params.niche,
       city: params.city || null,
       ddd: params.ddd || null,
       sources: params.sources,
       max_pages_per_source: params.max_pages_per_source || 10,
-      status: 'running',
+      status: 'pending',
       contacts_found: 0,
       created_at: Timestamp.now(),
       uid,
-      schedule: params.schedule || 'once'
+      schedule: params.schedule || 'once',
+      direct_url: params.direct_url || null
     };
 
     // Strip undefined values
@@ -628,7 +960,7 @@ export const startCrawl = async (params: CrawlJobParams): Promise<CrawlJob> => {
     try {
         await setDoc(doc(db, 'jobs', jobId), newJob);
     } catch (error) {
-        handleFirestoreError(error, OperationType.CREATE, `jobs/${jobId}`);
+        console.error("Error creating job doc:", error);
     }
 
     if (params.use_proxies && params.proxy_url) {
@@ -636,37 +968,62 @@ export const startCrawl = async (params: CrawlJobParams): Promise<CrawlJob> => {
     }
 
     try {
-        const agentPromises: Promise<{ contacts: GeminiContact[], sourceType: CrawlSource }>[] = [];
-
-        const TIMEOUT_MS = 90000; // 90 seconds per agent
-
-        if (params.sources.includes('google')) {
-            agentPromises.push(withTimeout(getGoogleSearchAgent(params), TIMEOUT_MS, 'google').then(c => ({ contacts: c, sourceType: 'google' })));
-        }
-        if (params.sources.includes('instagram_via_search')) {
-            agentPromises.push(withTimeout(getInstagramSearchAgent(params), TIMEOUT_MS, 'instagram_via_search').then(c => ({ contacts: c, sourceType: 'instagram_via_search' })));
-        }
-        if (params.sources.includes('linkedin_via_search')) {
-            agentPromises.push(withTimeout(getLinkedInSearchAgent(params), TIMEOUT_MS, 'linkedin_via_search').then(c => ({ contacts: c, sourceType: 'linkedin_via_search' })));
-        }
-        if (params.sources.includes('facebook_via_search')) {
-            agentPromises.push(withTimeout(getFacebookSearchAgent(params), TIMEOUT_MS, 'facebook_via_search').then(c => ({ contacts: c, sourceType: 'facebook_via_search' })));
-        }
-        if (params.sources.includes('apify')) {
-            agentPromises.push(withTimeout(getApifyAgent(params), TIMEOUT_MS, 'apify').then(c => ({ contacts: c, sourceType: 'apify' })));
-        }
-        if (params.sources.includes('firecrawl')) {
-            agentPromises.push(withTimeout(getFirecrawlAgent(params), TIMEOUT_MS, 'firecrawl').then(c => ({ contacts: c, sourceType: 'firecrawl' })));
-        }
-        if (params.sources.includes('google_maps')) {
-            agentPromises.push(withTimeout(getGoogleMapsAgent(params), TIMEOUT_MS, 'google_maps').then(c => ({ contacts: c, sourceType: 'google_maps' })));
-        }
-        if (params.sources.includes('doctoralia_via_search')) {
-            agentPromises.push(withTimeout(getDoctoraliaAgent(params), TIMEOUT_MS, 'doctoralia_via_search').then(c => ({ contacts: c, sourceType: 'doctoralia_via_search' })));
-        }
-        if (params.sources.includes('scrape_do')) {
-            agentPromises.push(withTimeout(getScrapeDoAgent(params), TIMEOUT_MS, 'scrape_do').then(c => ({ contacts: c, sourceType: 'scrape_do' })));
-        }
+        const TIMEOUT_MS = 300000; // Increased to 5 minutes
+        
+        // Stagger agent calls to avoid rate limit bursts and platform error toasts
+        const agentPromises = params.sources.map(async (source, index) => {
+            // Wait index * 15 seconds before starting this agent to avoid heavy RPM bursts (429 errors)
+            await new Promise(resolve => setTimeout(resolve, index * 15000));
+            
+            try {
+                let contacts: GeminiContact[] = [];
+                switch (source) {
+                    case 'google':
+                        contacts = await withTimeout(getGoogleSearchAgent(params), TIMEOUT_MS, 'google');
+                        break;
+                    case 'instagram_via_search':
+                        contacts = await withTimeout(getInstagramSearchAgent(params), TIMEOUT_MS, 'instagram_via_search');
+                        break;
+                    case 'linkedin_via_search':
+                        contacts = await withTimeout(getLinkedInSearchAgent(params), TIMEOUT_MS, 'linkedin_via_search');
+                        break;
+                    case 'facebook_via_search':
+                        contacts = await withTimeout(getFacebookSearchAgent(params), TIMEOUT_MS, 'facebook_via_search');
+                        break;
+                    case 'apify':
+                        contacts = await withTimeout(getApifyAgent(params), TIMEOUT_MS, 'apify');
+                        break;
+                    case 'firecrawl':
+                        contacts = await withTimeout(getFirecrawlAgent(params), TIMEOUT_MS, 'firecrawl');
+                        break;
+                    case 'google_maps':
+                        contacts = await withTimeout(getGoogleMapsAgent(params), TIMEOUT_MS, 'google_maps');
+                        break;
+                    case 'doctoralia_via_search':
+                        contacts = await withTimeout(getDoctoraliaAgent(params), TIMEOUT_MS, 'doctoralia_via_search');
+                        break;
+                    case 'doctoralia_direct':
+                        contacts = await withTimeout(getDoctoraliaDirectAgent(params), TIMEOUT_MS * 2, 'doctoralia_direct');
+                        break;
+                    case 'scrape_do':
+                        contacts = await withTimeout(getScrapeDoAgent(params), TIMEOUT_MS, 'scrape_do');
+                        break;
+                }
+                return { contacts, sourceType: source };
+            } catch (error: any) {
+                const errorMsg = error instanceof Error ? error.message : String(error);
+                const isThrottled = errorMsg.includes('429') || errorMsg.includes('quota') || errorMsg.includes('throttled');
+                
+                console.error(`[Agent Failed] ${source}:`, error);
+                
+                if (isThrottled) {
+                    console.warn(`[Quota Alert] Agent ${source} was throttled. Try running with fewer sources or wait.`);
+                }
+                
+                CrawlerLogger.logError(`${source.charAt(0).toUpperCase() + source.slice(1).replace(/_via_search/g, '')}Agent`, error, { source, params });
+                return { contacts: [], sourceType: source };
+            }
+        });
 
         if (agentPromises.length === 0) throw new Error("Nenhuma fonte selecionada.");
 
@@ -676,65 +1033,87 @@ export const startCrawl = async (params: CrawlJobParams): Promise<CrawlJob> => {
             .filter((result): result is PromiseFulfilledResult<{ contacts: GeminiContact[], sourceType: CrawlSource }> => result.status === 'fulfilled')
             .map(result => result.value);
 
-        const failedAgents = agentResultsSettled
-            .filter(result => result.status === 'rejected')
-            .map(result => (result as PromiseRejectedResult).reason);
-
-        if (failedAgents.length > 0) {
-            console.warn("Some agents failed or timed out:", failedAgents);
-        }
+        // Debug logging for awareness
+        agentResults.forEach(res => {
+            console.log(`[Crawl Logs] Agent ${res.sourceType} found ${res.contacts?.length || 0} contacts initially.`);
+        });
         
         let allContactsData = agentResults.flatMap(result => {
-            return result.contacts.map(contact => ({ ...contact, source_type: result.sourceType }));
+             if (!result.contacts) return [];
+             return result.contacts.map(contact => ({ ...contact, source_type: result.sourceType }));
         });
+
+        const totalBeforeDedup = allContactsData.length;
 
         // Deduplication and Sanitation
         const uniqueContactsMap = new Map<string, typeof allContactsData[0]>();
         
         allContactsData.forEach(contact => {
-             let phoneDigits = String(contact.e164_number || '').replace(/\D/g, '');
-             
-             // Remove leading zero if present (e.g., 081... -> 81...)
-             if (phoneDigits.startsWith('0') && (phoneDigits.length === 11 || phoneDigits.length === 12)) {
-                 phoneDigits = phoneDigits.substring(1);
+             // 1. Normalize Phone if exists
+             let phoneDigits = contact.e164_number ? String(contact.e164_number).replace(/\D/g, '') : '';
+             let fullNumberNormalized = '';
+
+             if (phoneDigits) {
+                 if (phoneDigits.startsWith('0') && (phoneDigits.length === 11 || phoneDigits.length === 12)) {
+                     phoneDigits = phoneDigits.substring(1);
+                 }
+                 if (phoneDigits.length === 10 || phoneDigits.length === 11) {
+                     fullNumberNormalized = '55' + phoneDigits;
+                 } else if (phoneDigits.length >= 12 && phoneDigits.startsWith('55')) {
+                     fullNumberNormalized = phoneDigits;
+                 }
+                 
+                 if (fullNumberNormalized && isValidBrazilianMobileNumber(fullNumberNormalized)) {
+                     contact.e164_number = '+' + fullNumberNormalized;
+                     contact.raw_number = contact.e164_number;
+                 }
              }
 
-             // Normalize to 55...
-             let fullNumberToCheck = phoneDigits;
-             // Heuristic: If 10 or 11 digits (DDD + number), assume BR and prepend 55
-             if (phoneDigits.length === 10 || phoneDigits.length === 11) {
-                 fullNumberToCheck = '55' + phoneDigits;
+             // 2. Determine Unique Key (Priority: Phone > Email > Instagram > LinkedIn > SourceURL)
+             let uniqueKey = '';
+             if (fullNumberNormalized) {
+                 uniqueKey = 'phone_' + fullNumberNormalized;
+             } else if (contact.email) {
+                 uniqueKey = 'email_' + contact.email.toLowerCase();
+             } else if (contact.instagram_handle) {
+                 uniqueKey = 'ig_' + contact.instagram_handle.toLowerCase().replace(/^@+/, '');
+             } else if (contact.linkedin_url) {
+                 uniqueKey = 'li_' + contact.linkedin_url.toLowerCase();
+             } else {
+                 uniqueKey = 'url_' + contact.source_url;
              }
              
-             // Final check: if it's 12 or 13 digits but doesn't start with 55, it might be a wrong number or another country
-             // But since we are targeting Brazil, we prioritize 55
-             
-             // Validate
-             if (isValidBrazilianMobileNumber(fullNumberToCheck)) {
-                 // Ensure it has 55 prefix for the map key
-                 if (fullNumberToCheck.length === 10 || fullNumberToCheck.length === 11) {
-                     fullNumberToCheck = '55' + fullNumberToCheck;
-                 }
-
-                 if (!uniqueContactsMap.has(fullNumberToCheck)) {
-                    // Update contact number to normalized version
-                    contact.e164_number = '+' + fullNumberToCheck; 
-                    uniqueContactsMap.set(fullNumberToCheck, contact);
-                 }
+             if (!uniqueContactsMap.has(uniqueKey)) {
+                 uniqueContactsMap.set(uniqueKey, contact);
              }
         });
         
         // Load existing to prevent global duplicates
         const existingContacts = await getContacts();
-        const existingPhones = new Set(existingContacts.map(c => String(c.e164_number || '').replace(/\D/g, '')));
+        const existingIdentifiers = new Set<string>();
+        existingContacts.forEach(c => {
+            if (c.e164_number) existingIdentifiers.add('phone_' + c.e164_number.replace(/\D/g, ''));
+            if (c.email) existingIdentifiers.add('email_' + c.email.toLowerCase());
+            if (c.instagram_handle) existingIdentifiers.add('ig_' + c.instagram_handle.toLowerCase().replace(/^@+/, ''));
+        });
         
         const blacklist = await getBlacklist();
         const blacklistedPhones = new Set(blacklist.map(b => String(b.e164_number || '').replace(/\D/g, '')));
 
         const newUniqueContactsData = Array.from(uniqueContactsMap.values()).filter(contact => {
-            const digits = String(contact.e164_number || '').replace(/\D/g, '');
-            return !existingPhones.has(digits) && !blacklistedPhones.has(digits);
+            const phoneDigits = contact.e164_number ? String(contact.e164_number).replace(/\D/g, '') : '';
+            
+            if (phoneDigits && (existingIdentifiers.has('phone_' + phoneDigits) || blacklistedPhones.has(phoneDigits))) return false;
+            if (contact.email && existingIdentifiers.has('email_' + contact.email.toLowerCase())) return false;
+            if (contact.instagram_handle && existingIdentifiers.has('ig_' + contact.instagram_handle.toLowerCase().replace(/^@+/, ''))) return false;
+            
+            return true;
         });
+
+        if (totalBeforeDedup > 0 && newUniqueContactsData.length === 0) {
+            console.warn(`[Crawl Alert] Encontrados ${totalBeforeDedup} contatos, mas todos já existiam no banco ou estavam na blacklist.`);
+            CrawlerLogger.logError("DeduplicationFilter", "Todos os contatos encontrados eram duplicados.", { totalBeforeDedup, niche: params.niche, city: params.city });
+        }
 
         const newContacts: Contact[] = newUniqueContactsData.map(contactData => ({
             ...contactData,
@@ -749,36 +1128,124 @@ export const startCrawl = async (params: CrawlJobParams): Promise<CrawlJob> => {
         } as any));
         
         if (newContacts.length > 0) {
-            for (const contact of newContacts) {
-                const contactToSave = { ...contact, found_at: Timestamp.fromDate(contact.found_at) };
+            // Use Firestore Batches for performance (limit 500)
+            const BATCH_SIZE = 500;
+            for (let i = 0; i < newContacts.length; i += BATCH_SIZE) {
+                const batch = writeBatch(db);
+                const chunk = newContacts.slice(i, i + BATCH_SIZE);
                 
-                // Strip undefined values to prevent Firestore errors
-                Object.keys(contactToSave).forEach(key => {
-                    if ((contactToSave as any)[key] === undefined) {
-                        delete (contactToSave as any)[key];
-                    }
+                chunk.forEach(contact => {
+                    const contactToSave = { ...contact, found_at: Timestamp.fromDate(contact.found_at) };
+                    Object.keys(contactToSave).forEach(key => {
+                        if ((contactToSave as any)[key] === undefined) {
+                            delete (contactToSave as any)[key];
+                        }
+                    });
+                    batch.set(doc(db, 'contacts', contact.id), contactToSave);
                 });
-
-                await setDoc(doc(db, 'contacts', contact.id), contactToSave);
+                
+                await batch.commit();
             }
         }
         
         // Update Job Status
-        newJob.status = 'completed';
-        newJob.contacts_found = newContacts.length;
-        await setDoc(doc(db, 'jobs', jobId), newJob);
+        await updateDoc(doc(db, 'jobs', jobId), {
+            status: 'completed',
+            contacts_found: newContacts.length
+        });
 
     } catch (error) {
         CrawlerLogger.logError("startCrawl", error, { params });
         try {
-            newJob.status = 'failed';
-            await setDoc(doc(db, 'jobs', jobId), newJob);
+            await updateDoc(doc(db, 'jobs', jobId), {
+                status: 'failed'
+            });
         } catch (updateErr) {
             console.error("Failed to update job status to failed", updateErr);
         }
     }
     
-    return convertTimestamps(newJob) as CrawlJob;
+    // Refresh local newJob state for return
+    const finalJobSnap = await getDoc(doc(db, 'jobs', jobId));
+    return convertTimestamps(finalJobSnap.data()) as CrawlJob;
+};
+
+export const getBlacklist = async (): Promise<BlacklistedContact[]> => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return [];
+    try {
+        const q = query(collection(db, 'blacklist'), where('uid', '==', uid));
+        const snapshot = await getDocs(q);
+        return snapshot.docs.map(doc => convertTimestamps(doc.data()) as BlacklistedContact);
+    } catch (error) {
+        handleFirestoreError(error, OperationType.LIST, 'blacklist');
+        return [];
+    }
+};
+
+export const importContacts = async (contactsData: Partial<Contact>[], jobId: string): Promise<number> => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) throw new Error("Unauthenticated");
+
+    const batch = writeBatch(db);
+    let count = 0;
+
+    for (const data of contactsData) {
+        const id = `import_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const contact: any = {
+            ...data,
+            id,
+            job_id: jobId,
+            found_at: Timestamp.now(),
+            status: data.status || 'new',
+            uid,
+            source_type: data.source_type || 'import'
+        };
+
+        // Strip undefined
+        Object.keys(contact).forEach(key => {
+            if (contact[key] === undefined) delete contact[key];
+        });
+
+        const docRef = doc(db, 'contacts', id);
+        batch.set(docRef, contact);
+        count++;
+        
+        // Batch limit is 500
+        if (count % 450 === 0) {
+            await batch.commit();
+        }
+    }
+
+    if (count % 450 !== 0) {
+        await batch.commit();
+    }
+
+    return count;
+};
+
+export const addManualContact = async (contactData: Partial<Contact>): Promise<string> => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) throw new Error("Unauthenticated");
+
+    const id = `manual_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const contact: any = {
+        ...contactData,
+        id,
+        found_at: Timestamp.now(),
+        status: contactData.status || 'new',
+        uid,
+        source_type: 'manual',
+        job_id: contactData.job_id || 'manual_list'
+    };
+
+    // Strip undefined
+    Object.keys(contact).forEach(key => {
+        if (contact[key] === undefined) delete contact[key];
+    });
+
+    await setDoc(doc(db, 'contacts', id), contact);
+    return id;
 };
 
 export const getJobs = async (): Promise<CrawlJob[]> => {
@@ -793,6 +1260,37 @@ export const getJobs = async (): Promise<CrawlJob[]> => {
     } catch (error) {
         handleFirestoreError(error, OperationType.LIST, 'jobs');
         return [];
+    }
+};
+
+export const createManualJob = async (name: string, niche: string = 'Manual Import'): Promise<string> => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) throw new Error("Unauthenticated");
+
+    const id = `job_manual_${Date.now()}`;
+    const newJob: any = {
+        id,
+        name,
+        niche,
+        status: 'completed',
+        contacts_found: 0,
+        created_at: Timestamp.now(),
+        uid,
+        sources: ['manual'],
+        max_pages_per_source: 1
+    };
+
+    await setDoc(doc(db, 'jobs', id), newJob);
+    return id;
+};
+
+export const updateJobName = async (jobId: string, name: string): Promise<void> => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) throw new Error("User must be authenticated to update a job.");
+    try {
+        await updateDoc(doc(db, 'jobs', jobId), { name });
+    } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `jobs/${jobId}`);
     }
 };
 
@@ -883,21 +1381,30 @@ export const enrichContact = async (contact: Contact): Promise<Contact> => {
     if (!uid) throw new Error("User not authenticated.");
 
     try {
-        const response = await ai.models.generateContent({
+        const result = await ai.models.generateContent({
+            // ... (rest of config)
             model: "gemini-3-flash-preview",
-            contents: `Analyze the following URL and extract information specifically about the entity (person or business) named "${contact.name}".
+            contents: `Analyze the following URL and extract detailed information specifically about the entity (person or business) named "${contact.name}".
             
             IMPORTANT CONSTRAINTS:
             1. Do NOT extract support or generic emails from the platform itself (e.g., @google.com, @google-maps.com, @instagram.com, @facebook.com, @doctoralia.com.br, @linkedin.com).
-            2. The description MUST be about "${contact.name}" and their services/profile, NOT about the platform (Google Maps, Instagram, etc.).
+            2. The description MUST be about "${contact.name}" and their services/profile, NOT about the platform.
             3. If no specific email for this entity is found, return an empty string for the email field.
-            4. Lead quality score (1-10) should reflect how good this lead is for a sales outreach.
+            4. Extract official LinkedIn profile URLs, Instagram handles (@user), Facebook pages, and official website URLs if visible.
+            5. Lead quality score (1-10) should reflect how good this lead is for a multi-channel outreach.
+            6. MANDATORY: Find a VALID profile picture URL (avatar). 
+               - A VALID URL must end with an image extension (.jpg, .png, .webp) or contain a direct CDN link (fbcdn.net, cdninstagram.com, ggpht.com).
+               - DO NOT return a page link (e.g., instagram.com/p/...) as a photo_url.
+               - Look for 'og:image' or 'twitter:image' meta tags.
+               - FOR WHATSAPP: Search the phone ${contact.e164_number} in professional directories.
+               - IF NO IMAGE IS FOUND: Return an empty string or null. DO NOT guess a broken URL.
+               - Use Google Search extensively to verify the "Profile Image" of ${contact.name}.
 
             Entity Name: ${contact.name}
             Entity Category: ${contact.category}
             URL: ${contact.source_url}`,
             config: {
-                tools: [{ urlContext: {} }],
+                tools: [{ urlContext: {} }, { googleSearch: {} }],
                 responseMimeType: "application/json",
                 responseSchema: {
                     type: Type.OBJECT,
@@ -905,14 +1412,24 @@ export const enrichContact = async (contact: Contact): Promise<Contact> => {
                         email: { type: Type.STRING },
                         description: { type: Type.STRING },
                         account_type: { type: Type.STRING, enum: ['personal', 'business', 'unknown'] },
-                        lead_quality: { type: Type.NUMBER }
+                        lead_quality: { type: Type.NUMBER },
+                        photo_url: { type: Type.STRING },
+                        linkedin_url: { type: Type.STRING },
+                        instagram_handle: { type: Type.STRING },
+                        facebook_url: { type: Type.STRING },
+                        website: { type: Type.STRING }
                     },
                     required: ["email", "description", "account_type", "lead_quality"]
                 }
             }
         });
 
-        const enrichmentData = JSON.parse(response.text);
+        const enrichmentData = JSON.parse(result.text || '{}');
+        
+        // Normalize handle
+        if (enrichmentData.instagram_handle) {
+            enrichmentData.instagram_handle = enrichmentData.instagram_handle.replace(/^@+/, '');
+        }
         
         // Extra client-side filter for platform emails
         const platformDomains = ['google.com', 'google-maps.com', 'instagram.com', 'facebook.com', 'doctoralia.com.br', 'linkedin.com', 'apify.com'];
@@ -960,20 +1477,6 @@ export const deleteContacts = async (contactIds: string[]): Promise<void> => {
         }
     } catch (error) {
         handleFirestoreError(error, OperationType.DELETE, 'contacts/bulk');
-    }
-};
-
-export const getBlacklist = async (): Promise<BlacklistedContact[]> => {
-    const uid = auth.currentUser?.uid;
-    if (!uid) return [];
-
-    try {
-        const q = query(collection(db, 'blacklist'), where('uid', '==', uid));
-        const snapshot = await getDocs(q);
-        return snapshot.docs.map(doc => convertTimestamps(doc.data()) as BlacklistedContact);
-    } catch (error) {
-        handleFirestoreError(error, OperationType.LIST, 'blacklist');
-        return [];
     }
 };
 

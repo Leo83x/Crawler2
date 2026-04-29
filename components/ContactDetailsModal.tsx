@@ -1,4 +1,5 @@
 import React from 'react';
+import { Avatar } from './Avatar';
 import { Contact } from '../types';
 import { 
   XIcon, 
@@ -12,8 +13,12 @@ import {
   CalendarIcon,
   ExternalLinkIcon,
   InfoIcon,
-  TagIcon
+  TagIcon,
+  LaptopIcon
 } from 'lucide-react';
+import { LinkedInIcon } from './icons/LinkedInIcon';
+import { InstagramIcon } from './icons/InstagramIcon';
+import { FacebookIcon } from './icons/FacebookIcon';
 
 interface ContactDetailsModalProps {
   contact: Contact;
@@ -27,9 +32,13 @@ const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({ contact, onCl
         {/* Header */}
         <div className="px-6 py-4 border-b border-gray-700 flex justify-between items-center bg-gray-800/50">
           <div className="flex items-center gap-3">
-            <div className={`p-2 rounded-lg ${contact.account_type === 'business' ? 'bg-sky-900/30 text-sky-400' : 'bg-purple-900/30 text-purple-400'}`}>
-              {contact.account_type === 'business' ? <BuildingIcon size={20} /> : <UserIcon size={20} />}
-            </div>
+            <Avatar 
+                src={contact.photo_url} 
+                name={contact.name} 
+                size="xl" 
+                accountType={contact.account_type as any}
+                className="border-2 border-sky-500/50"
+            />
             <div>
               <h3 className="text-xl font-bold text-white leading-tight">{contact.name || 'Sem Nome'}</h3>
               <p className="text-sm text-gray-400">{contact.category || 'Sem Categoria'}</p>
@@ -48,15 +57,45 @@ const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({ contact, onCl
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Basic Info */}
             <div className="space-y-4">
-              <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Informações Básicas</h4>
+              <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Informação de Contato</h4>
               
-              <div className="flex items-start gap-3">
-                <PhoneIcon size={18} className="text-sky-400 mt-0.5" />
-                <div>
-                  <p className="text-xs text-gray-500">WhatsApp (E.164)</p>
-                  <p className="text-sm text-white font-mono">{contact.e164_number}</p>
+              {contact.e164_number ? (
+                <div className="flex items-start gap-3">
+                  <PhoneIcon size={18} className="text-sky-400 mt-0.5" />
+                  <div>
+                    <p className="text-xs text-gray-500">WhatsApp (E.164)</p>
+                    <p className="text-sm text-white font-mono">{contact.e164_number}</p>
+                  </div>
                 </div>
-              </div>
+              ) : contact.instagram_handle ? (
+                <div className="flex items-start gap-3">
+                  <div className="text-pink-400 mt-0.5"><InstagramIcon /></div>
+                  <div>
+                    <p className="text-xs text-gray-500">Instagram Principal</p>
+                    <a href={`https://instagram.com/${contact.instagram_handle.replace(/^@+/, '')}`} target="_blank" rel="noopener noreferrer" className="text-sm text-sky-400 hover:underline">
+                      @{contact.instagram_handle.replace(/^@+/, '')}
+                    </a>
+                  </div>
+                </div>
+              ) : contact.linkedin_url ? (
+                <div className="flex items-start gap-3">
+                  <div className="text-blue-400 mt-0.5"><LinkedInIcon /></div>
+                  <div>
+                    <p className="text-xs text-gray-500">LinkedIn Principal</p>
+                    <a href={contact.linkedin_url} target="_blank" rel="noopener noreferrer" className="text-sm text-sky-400 hover:underline">
+                      Ver Perfil
+                    </a>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-start gap-3">
+                  <InfoIcon size={18} className="text-gray-500 mt-0.5" />
+                  <div>
+                    <p className="text-xs text-gray-500">Contato Direto</p>
+                    <p className="text-sm text-gray-400 italic">Não identificado</p>
+                  </div>
+                </div>
+              )}
 
               <div className="flex items-start gap-3">
                 <MapPinIcon size={18} className="text-sky-400 mt-0.5" />
@@ -81,6 +120,16 @@ const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({ contact, onCl
                   </a>
                 </div>
               </div>
+
+              {contact.photo_url && (
+                <div className="flex items-start gap-3">
+                  <LaptopIcon size={18} className="text-sky-400 mt-0.5" />
+                  <div>
+                    <p className="text-xs text-gray-500">URL da Foto</p>
+                    <p className="text-[10px] text-gray-400 font-mono break-all line-clamp-2">{contact.photo_url}</p>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* AI Enrichment Info */}
@@ -98,6 +147,39 @@ const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({ contact, onCl
                       <p className="text-sm text-white">{contact.email || 'Nenhum e-mail encontrado'}</p>
                     </div>
                   </div>
+
+                  {(contact.linkedin_url || contact.instagram_handle || contact.website || contact.facebook_url) && (
+                    <div className="space-y-4 mt-4 pt-4 border-t border-gray-700/50">
+                      <h5 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Presença Digital</h5>
+                      
+                      {contact.linkedin_url && (
+                        <div className="flex items-center gap-3">
+                          <LinkedInIcon />
+                          <a href={contact.linkedin_url} target="_blank" rel="noopener noreferrer" className="text-sm text-sky-400 hover:underline flex items-center gap-1">
+                            LinkedIn <ExternalLinkIcon size={12} />
+                          </a>
+                        </div>
+                      )}
+
+                      {contact.instagram_handle && (
+                        <div className="flex items-center gap-3">
+                          <InstagramIcon />
+                          <a href={`https://instagram.com/${contact.instagram_handle.replace(/^@+/, '')}`} target="_blank" rel="noopener noreferrer" className="text-sm text-sky-400 hover:underline flex items-center gap-1">
+                            @{contact.instagram_handle.replace(/^@+/, '')} <ExternalLinkIcon size={12} />
+                          </a>
+                        </div>
+                      )}
+
+                      {contact.website && (
+                        <div className="flex items-center gap-3">
+                          <LaptopIcon size={16} className="text-emerald-400" />
+                          <a href={contact.website.startsWith('http') ? contact.website : `https://${contact.website}`} target="_blank" rel="noopener noreferrer" className="text-sm text-sky-400 hover:underline flex items-center gap-1">
+                            Website <ExternalLinkIcon size={12} />
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   <div className="flex items-start gap-3">
                     <StarIcon size={18} className="text-yellow-400 mt-0.5" />
@@ -151,7 +233,7 @@ const ContactDetailsModal: React.FC<ContactDetailsModalProps> = ({ contact, onCl
         <div className="px-6 py-4 border-t border-gray-700 bg-gray-800/50 flex justify-between items-center">
           <div className="flex items-center gap-2 text-xs text-gray-500">
             <CalendarIcon size={14} />
-            <span>Encontrado em: {new Date(contact.found_at).toLocaleDateString('pt-BR')}</span>
+            <span>Encontrado em: {contact.found_at ? new Date(contact.found_at).toLocaleDateString('pt-BR') : '--'}</span>
           </div>
           <button 
             onClick={onClose}

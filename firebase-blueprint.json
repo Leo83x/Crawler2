@@ -6,6 +6,7 @@
       "type": "object",
       "properties": {
         "id": { "type": "string" },
+        "name": { "type": "string" },
         "niche": { "type": "string" },
         "city": { "type": "string" },
         "ddd": { "type": "string" },
@@ -42,12 +43,57 @@
         "status": { "type": "string", "enum": ["new", "contacted", "interested", "converted", "rejected"] },
         "notes": { "type": "string" },
         "email": { "type": "string" },
+        "linkedin_url": { "type": "string" },
+        "instagram_handle": { "type": "string" },
+        "facebook_url": { "type": "string" },
+        "website": { "type": "string" },
         "description": { "type": "string" },
         "account_type": { "type": "string", "enum": ["personal", "business", "unknown"] },
         "lead_quality": { "type": "number" },
-        "enriched_at": { "type": "string", "format": "date-time" }
+        "enriched_at": { "type": "string", "format": "date-time" },
+        "outreach_history": { "type": "array", "items": { "$ref": "#/entities/OutreachInteraction" } },
+        "last_interaction_at": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "e164_number", "raw_number", "job_id", "found_at", "uid"]
+    },
+    "OutreachInteraction": {
+      "title": "OutreachInteraction",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string", "enum": ["email", "linkedin", "instagram", "whatsapp"] },
+        "direction": { "type": "string", "enum": ["inbound", "outbound"] },
+        "content": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["sent", "delivered", "read", "replied", "failed"] }
+      }
+    },
+    "OutreachCampaign": {
+      "title": "OutreachCampaign",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "channel": { "type": "string", "enum": ["email", "linkedin", "instagram", "whatsapp", "omnichannel"] },
+        "template_id": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "paused", "completed"] },
+        "daily_limit": { "type": "number" },
+        "sent_today": { "type": "number" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "uid": { "type": "string" }
+      }
+    },
+    "MessageTemplate": {
+      "title": "MessageTemplate",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "base_content": { "type": "string" },
+        "variants": { "type": "array", "items": { "type": "string" } },
+        "channel": { "type": "string", "enum": ["email", "linkedin", "instagram", "whatsapp"] },
+        "uid": { "type": "string" }
+      }
     },
     "ErrorLog": {
       "title": "ErrorLog",

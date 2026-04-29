@@ -3,12 +3,16 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { CrawlJob, CrawlJobParams } from '../types';
 import CrawlForm from './CrawlForm';
 import JobList from './JobList';
-import { getJobs, deleteJob, startCrawl, getDashboardStats } from '../services/crawlerService';
+import { getJobs, deleteJob, startCrawl, getDashboardStats, updateJobName } from '../services/crawlerService';
 import ConfirmationModal from './ConfirmationModal';
 import { DashboardStats } from './DashboardStats';
 
-const Dashboard: React.FC = () => {
-  const [jobs, setJobs] = useState<CrawlJob[]>([]);
+interface DashboardProps {
+  jobs: CrawlJob[];
+  onJobsUpdate: () => void;
+}
+
+const Dashboard: React.FC<DashboardProps> = ({ jobs, onJobsUpdate }) => {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState<{
@@ -31,30 +35,27 @@ const Dashboard: React.FC = () => {
     onConfirm: () => {},
   });
 
-  const fetchJobs = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     try {
-      // Don't set loading to true on refetch to avoid flicker
-      // setIsLoading(true); 
-      const fetchedJobs = await getJobs();
-      setJobs(fetchedJobs);
+      await onJobsUpdate();
       const fetchedStats = await getDashboardStats();
       setStats(fetchedStats);
       setError(null);
     } catch (err) {
-      setError('Falha ao buscar jobs. Por favor, tente novamente.');
+      setError('Falha ao buscar dados. Por favor, tente novamente.');
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [onJobsUpdate]);
   
   useEffect(() => {
-    fetchJobs();
-    const interval = setInterval(fetchJobs, 2000); // Poll for updates
+    fetchData();
+    const interval = setInterval(fetchData, 5000); // Poll for updates
     return () => clearInterval(interval);
-  }, [fetchJobs]);
+  }, [fetchData]);
 
   const handleJobCreated = (newJob: CrawlJob) => {
-    setJobs(prevJobs => [newJob, ...prevJobs.filter(j => j.id !== newJob.id)]);
+    onJobsUpdate();
   };
 
   const handleDeleteJob = async (id: string) => {
@@ -66,7 +67,7 @@ const Dashboard: React.FC = () => {
       onConfirm: async () => {
         try {
           await deleteJob(id);
-          setJobs(prev => prev.filter(j => j.id !== id));
+          onJobsUpdate();
         } catch (err) {
           setError('Falha ao excluir job.');
         } finally {
@@ -80,7 +81,7 @@ const Dashboard: React.FC = () => {
     setConfirmModal({
       isOpen: true,
       title: 'Tentar Novamente',
-      message: `Deseja reiniciar a pesquisa para "${job.niche}" em "${job.city || 'Brasil'}"?`,
+      message: `Deseja reiniciar a pesquisa para "${job.name || job.niche}" em "${job.city || 'Brasil'}"?`,
       onConfirm: async () => {
         try {
           const params: CrawlJobParams = {
@@ -94,7 +95,7 @@ const Dashboard: React.FC = () => {
             run_mode: 'once' // Default run mode for retry
           };
           await startCrawl(params);
-          fetchJobs();
+          onJobsUpdate();
         } catch (err) {
           setError('Falha ao reiniciar job.');
         } finally {
@@ -102,6 +103,15 @@ const Dashboard: React.FC = () => {
         }
       }
     });
+  };
+
+  const handleRenameJob = async (id: string, name: string) => {
+    try {
+      await updateJobName(id, name);
+      onJobsUpdate();
+    } catch (err) {
+      setError('Falha ao renomear job.');
+    }
   };
 
   return (
@@ -126,6 +136,7 @@ const Dashboard: React.FC = () => {
             error={error} 
             onDeleteJob={handleDeleteJob}
             onRetryJob={handleRetryJob}
+            onRenameJob={handleRenameJob}
           />
         </div>
       </div>

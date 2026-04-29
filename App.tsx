@@ -5,27 +5,57 @@ import ContactsView from './components/ContactsView';
 import PhoneValidator from './components/PhoneValidator';
 import BlacklistView from './components/BlacklistView';
 import LogsView from './components/LogsView';
+import OutreachInbox from './components/OutreachInbox';
+import CampaignsView from './components/CampaignsView';
 import { SearchIcon } from './components/icons/SearchIcon';
 import { UsersIcon } from './components/icons/UsersIcon';
 import { CheckCircleIcon } from './components/icons/CheckCircleIcon';
 import { TrashIcon } from './components/icons/TrashIcon';
-import { auth, loginWithGoogle, logout, onAuthStateChanged, User } from './firebase';
+import { MessageSquareIcon, BarChart3Icon } from 'lucide-react';
+import { auth, loginWithGoogle, logout, onAuthStateChanged, User, db } from './firebase';
 import { LoaderIcon } from './components/icons/LoaderIcon';
+import { getJobs } from './services/crawlerService';
+import { CrawlJob } from './types';
+import { doc, getDocFromServer } from 'firebase/firestore';
 
-type View = 'dashboard' | 'contacts' | 'validator' | 'blacklist' | 'logs';
+type View = 'dashboard' | 'contacts' | 'validator' | 'blacklist' | 'logs' | 'outreach' | 'campaigns';
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [jobs, setJobs] = useState<CrawlJob[]>([]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setUser(user);
       setLoading(false);
+      if (user) {
+        fetchJobs();
+        testConnection();
+      }
     });
     return () => unsubscribe();
   }, []);
+
+  const fetchJobs = async () => {
+    try {
+      const fetchedJobs = await getJobs();
+      setJobs(fetchedJobs);
+    } catch (err) {
+      console.error("Error fetching jobs:", err);
+    }
+  };
+
+  const testConnection = async () => {
+    try {
+      await getDocFromServer(doc(db, 'test', 'connection'));
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('the client is offline')) {
+        console.error("Please check your Firebase configuration.");
+      }
+    }
+  };
 
   if (loading) {
     return (
@@ -42,8 +72,8 @@ const App: React.FC = () => {
           <div className="w-20 h-20 bg-sky-600 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg transform rotate-3">
             <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
           </div>
-          <h1 className="text-3xl font-bold text-white mb-2">Contact Crawler</h1>
-          <p className="text-gray-400 mb-8">Faça login para gerenciar seus jobs de extração e contatos.</p>
+          <h1 className="text-3xl font-bold text-white mb-2">Omnichannel Outreach</h1>
+          <p className="text-gray-400 mb-8">Faça login para gerenciar seus jobs de extração e prospecção.</p>
           <button
             onClick={loginWithGoogle}
             className="w-full flex items-center justify-center bg-white text-gray-900 font-bold py-3 px-4 rounded-xl hover:bg-gray-100 transition duration-300 shadow-lg"
@@ -59,17 +89,21 @@ const App: React.FC = () => {
   const renderView = () => {
     switch (currentView) {
       case 'dashboard':
-        return <Dashboard />;
+        return <Dashboard jobs={jobs} onJobsUpdate={fetchJobs} />;
       case 'contacts':
-        return <ContactsView />;
+        return <ContactsView jobs={jobs} onJobsUpdate={fetchJobs} />;
       case 'validator':
         return <PhoneValidator />;
       case 'blacklist':
         return <BlacklistView />;
       case 'logs':
         return <LogsView />;
+      case 'outreach':
+        return <OutreachInbox jobs={jobs} onJobsUpdate={fetchJobs} />;
+      case 'campaigns':
+        return <CampaignsView />;
       default:
-        return <Dashboard />;
+        return <Dashboard jobs={jobs} onJobsUpdate={fetchJobs} />;
     }
   };
 
@@ -98,7 +132,7 @@ const App: React.FC = () => {
       <aside className="w-64 bg-gray-800 p-4 shadow-2xl flex flex-col">
         <div className="text-2xl font-bold text-white mb-8 border-b border-gray-700 pb-4 flex items-center">
           <svg className="w-8 h-8 mr-2 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-          UI de Crawler
+          Outreach Pro
         </div>
         <nav className="flex-grow">
           <ul>
@@ -106,6 +140,8 @@ const App: React.FC = () => {
             <NavItem viewName="contacts" icon={<UsersIcon />} label="Contatos" />
             <NavItem viewName="validator" icon={<CheckCircleIcon />} label="Validador de Telefone" />
             <NavItem viewName="blacklist" icon={<TrashIcon />} label="Lista de Exclusão" />
+            <NavItem viewName="outreach" icon={<MessageSquareIcon size={20} />} label="Inbox Unificada" />
+            <NavItem viewName="campaigns" icon={<BarChart3Icon size={20} />} label="Campanhas" />
             <NavItem viewName="logs" icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>} label="Logs de Erro" />
           </ul>
         </nav>
